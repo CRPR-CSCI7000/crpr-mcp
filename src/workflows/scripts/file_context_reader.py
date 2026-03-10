@@ -10,31 +10,25 @@ MAX_LINE_WINDOW = 60
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Read a bounded line range from one file.")
-    parser.add_argument("--args-json", required=True, help="JSON object for workflow args")
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--path", required=True)
+    parser.add_argument("--start-line", type=int, required=True)
+    parser.add_argument("--end-line", type=int, required=True)
     return parser.parse_args(argv)
-
-
-def _ensure_mapping(raw: str) -> dict:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise ValueError("args-json must decode to an object")
-    return payload
 
 
 async def main():
     try:
         cli = parse_args()
-        payload = _ensure_mapping(cli.args_json)
-
-        repo = str(payload.get("repo", "")).strip()
-        path = str(payload.get("path", "")).strip()
+        repo = str(cli.repo).strip()
+        path = str(cli.path).strip()
         if not repo:
             raise ValueError("missing required arg: repo")
         if not path:
             raise ValueError("missing required arg: path")
 
-        start_line = int(payload.get("start_line", 0))
-        end_line = int(payload.get("end_line", 0))
+        start_line = int(cli.start_line)
+        end_line = int(cli.end_line)
         if start_line <= 0 or end_line <= 0:
             raise ValueError("start_line and end_line must be positive integers")
         if end_line < start_line:

@@ -17,6 +17,8 @@ from .safety import validate_custom_workflow_code
 RESULT_MARKER = "__RESULT_JSON__="
 TIMEOUT_EXIT_CODE = 124
 _ENV_ALLOWLIST = {
+    "GITHUB_API_URL",
+    "GITHUB_TOKEN",
     "HOME",
     "LANG",
     "LC_ALL",
@@ -178,7 +180,6 @@ class ExecutionRunner:
     async def run_custom_workflow_code(
         self,
         code: str,
-        args: dict[str, Any],
         timeout_seconds: int,
     ) -> ExecutionResult:
         rejections = validate_custom_workflow_code(code)
@@ -199,10 +200,16 @@ class ExecutionRunner:
             script_path.write_text(code, encoding="utf-8")
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
 
-            command = self._build_custom_workflow_command(script_path, args)
+            command = self._build_custom_workflow_command(script_path)
 
             try:
-                return await self._execute(command=command, cwd=temp_dir, timeout_seconds=timeout_seconds)
+                return await self._execute(
+                    command=command,
+                    cwd=temp_dir,
+                    timeout_seconds=timeout_seconds,
+                    require_result_marker=False,
+                    allow_plain_stdout_result=True,
+                )
             finally:
                 if script_path.exists():
                     script_path.unlink()
@@ -212,6 +219,8 @@ class ExecutionRunner:
         command: list[str],
         cwd: Path,
         timeout_seconds: int,
+        require_result_marker: bool = True,
+        allow_plain_stdout_result: bool = False,
     ) -> ExecutionResult:
         normalized_timeout = self._normalize_timeout(timeout_seconds)
         start = time.monotonic()
@@ -249,10 +258,12 @@ class ExecutionRunner:
         full_stdout = self._decode_lossy(stdout_bytes)
         full_stderr = self._decode_lossy(stderr_bytes)
         cleaned_stdout_full, result_json, parse_error, marker_found = self._extract_result_json(full_stdout)
+        if result_json is None and allow_plain_stdout_result:
+            result_json = self._coerce_plain_stdout_result(cleaned_stdout_full)
         stdout = self._cap_text(cleaned_stdout_full, self.stdout_max_bytes, "stdout")
         stderr = self._cap_text(full_stderr, self.stderr_max_bytes, "stderr")
 
-        if not marker_found and result_json is None:
+        if require_result_marker and not marker_found and result_json is None:
             marker_error = "result marker not found"
             stderr = f"{stderr}\n{marker_error}" if stderr else marker_error
         if parse_error:
@@ -365,60 +376,48 @@ class ExecutionRunner:
 
     @staticmethod
     def _build_isolated_command(script_path: Path, args: dict[str, Any]) -> list[str]:
-        args_json = json.dumps(args)
         script = str(script_path)
         script_parent = str(script_path.parent)
+        argv_tokens = ExecutionRunner._build_cli_argv_tokens(args)
         bootstrap = (
             "import runpy,sys;"
             f"script={script!r};"
             f"sys.path.insert(0,{script_parent!r});"
-            f"sys.argv=[script,'--args-json',{args_json!r}];"
+            f"argv={argv_tokens!r};"
+            "sys.argv=[script,*argv];"
             "runpy.run_path(script, run_name='__main__')"
         )
         return [sys.executable, "-I", "-u", "-c", bootstrap]
 
     @staticmethod
-    def _build_custom_workflow_command(script_path: Path, args: dict[str, Any]) -> list[str]:
-        args_json = json.dumps(args, ensure_ascii=True)
+    def _build_cli_argv_tokens(args: dict[str, Any]) -> list[str]:
+        argv: list[str] = []
+        for arg_name in sorted(args.keys()):
+            argv.append(f"--{arg_name.replace('_', '-')}")
+            argv.append(ExecutionRunner._serialize_cli_value(args[arg_name]))
+        return argv
+
+    @staticmethod
+    def _serialize_cli_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (str, int, float)):
+            return str(value)
+        if value is None:
+            return ""
+        return json.dumps(value, ensure_ascii=True)
+
+    @staticmethod
+    def _build_custom_workflow_command(script_path: Path) -> list[str]:
         script = str(script_path)
         script_parent = str(script_path.parent)
         bootstrap = (
-            "import asyncio\n"
-            "import inspect\n"
-            "import json\n"
             "import runpy\n"
             "import sys\n"
             f"script = {script!r}\n"
-            f"args_json = {args_json!r}\n"
-            f"result_marker = {RESULT_MARKER!r}\n"
             f"sys.path.insert(0, {script_parent!r})\n"
-            "namespace = runpy.run_path(script, run_name='__custom_workflow__')\n"
-            "run_fn = namespace.get('run')\n"
-            "if callable(run_fn):\n"
-            "    payload = json.loads(args_json)\n"
-            "    if inspect.iscoroutinefunction(run_fn):\n"
-            "        run_result = asyncio.run(run_fn(payload))\n"
-            "    else:\n"
-            "        run_result = run_fn(payload)\n"
-            "    if isinstance(run_result, int) and not isinstance(run_result, bool):\n"
-            "        exit_code = run_result\n"
-            "        marker_payload = None\n"
-            "    else:\n"
-            "        exit_code = 0\n"
-            "        marker_payload = run_result\n"
-            "    print(result_marker + json.dumps(marker_payload, ensure_ascii=True))\n"
-            "    raise SystemExit(exit_code)\n"
-            "main_fn = namespace.get('main')\n"
-            "if callable(main_fn):\n"
-            "    sys.argv = [script, '--args-json', args_json]\n"
-            "    if inspect.iscoroutinefunction(main_fn):\n"
-            "        main_result = asyncio.run(main_fn())\n"
-            "    else:\n"
-            "        main_result = main_fn()\n"
-            "    if isinstance(main_result, int) and not isinstance(main_result, bool):\n"
-            "        raise SystemExit(main_result)\n"
-            "    raise SystemExit(0)\n"
-            "raise SystemExit('missing entrypoint: expected run(args) or legacy main()')\n"
+            "sys.argv = [script]\n"
+            "runpy.run_path(script, run_name='__main__')\n"
         )
         return [sys.executable, "-I", "-u", "-c", bootstrap]
 
@@ -467,6 +466,17 @@ class ExecutionRunner:
                 pass
 
         return stdout, None, None, False
+
+    @staticmethod
+    def _coerce_plain_stdout_result(stdout: str) -> Any:
+        stripped = stdout.strip()
+        if not stripped:
+            return None
+
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped
 
     @staticmethod
     def _elapsed_ms(start: float) -> int:

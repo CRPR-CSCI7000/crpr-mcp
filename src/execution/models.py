@@ -15,12 +15,6 @@ class ExecutionResult(BaseModel):
     safety_rejections: list[str] = Field(default_factory=list)
 
 
-class WorkflowRunRequest(BaseModel):
-    workflow_id: str
-    args: dict[str, Any] = Field(default_factory=dict)
-    timeout_seconds: int = 30
-
-
 class WorkflowCliRunRequest(BaseModel):
     command: str
     timeout_seconds: int = 30
@@ -28,5 +22,4 @@ class WorkflowCliRunRequest(BaseModel):
 
 class CustomWorkflowCodeRunRequest(BaseModel):
     code: str
-    args: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int = 30

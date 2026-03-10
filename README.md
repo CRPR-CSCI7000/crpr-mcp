@@ -17,10 +17,10 @@ There is no separate executor service.
 
 The server exposes only these 4 tools:
 
-1. `list_capabilities()`
+1. `list_capabilities(view: Literal["capabilities", "runtime_helpers"] = "capabilities")`
 2. `read_capability(capability_id: str)`
 3. `run_workflow_cli(command: str, timeout_seconds: int = 30)`
-4. `run_custom_workflow_code(code: str, args: dict = {}, timeout_seconds: int = 30)`
+4. `run_custom_workflow_code(code: str, timeout_seconds: int = 30)`
 
 All tool responses are rendered as markdown text for agent readability.
 
@@ -38,7 +38,8 @@ Removed tools:
 1. Call `list_capabilities`.
 2. Call `read_capability` for selected ids.
 3. Prefer `run_workflow_cli` for known tasks.
-4. Use `run_custom_workflow_code` only when workflows do not fit.
+4. For custom code, optionally call `list_capabilities(view="runtime_helpers")`.
+5. Use `run_custom_workflow_code` only when workflows do not fit.
 
 `run_workflow_cli` command format:
 
@@ -49,14 +50,12 @@ Removed tools:
 
 Generated scripts are AST-validated before execution:
 
-- Preferred entrypoint shape:
-  - `def run(args)` or `async def run(args)`
-- Legacy entrypoint shape is still accepted:
-  - `def parse_args(...)`
-  - `def/async def main()`
-  - `if __name__ == "__main__": ...`
-- Import allowlist centered on: `argparse`, `asyncio`, `json`, `sys`, and runtime helpers via
-  `from runtime import zoekt_tools` or `import runtime.zoekt_tools as zoekt_tools`
+- Script should be self-contained top-level Python code.
+- Import policy allows only approved modules from the safety allowlist.
+- Runtime helpers are available via
+  `from runtime import zoekt_tools, github_tools`,
+  `import runtime.zoekt_tools as zoekt_tools`, or
+  `import runtime.github_tools as github_tools`.
 - Banned imports include modules such as `os`, `subprocess`, `socket`, `ctypes`, `multiprocessing`, `pathlib`
 - Banned calls include `eval`, `exec`, `compile`, `open`, `__import__`, `input`
 
@@ -66,10 +65,10 @@ Generated scripts are AST-validated before execution:
 - Subprocess invocation uses `python -I -u`.
 - Environment is reduced to an allowlist.
 - Timeout and stdout/stderr caps are enforced.
-- Scripts can emit a final marker line:
-  - `__RESULT_JSON__=<json>`
-  - parsed into `ExecutionResult.result_json`
-- If marker is missing but stdout is plain JSON, runner parses stdout as result payload.
+- Result payload is parsed from stdout:
+  - plain JSON stdout -> parsed JSON result
+  - plain text stdout -> string result
+  - marker output `__RESULT_JSON__=<json>` is also accepted
 
 This is process-level sandboxing, not container-grade isolation.
 

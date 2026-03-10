@@ -150,47 +150,160 @@ workflows:
       end_line: integer
       content: string
 
-  - id: cross_repo_trace
-    summary: Build a quick cross-repository trace for a symbol.
-    when_to_use: Use when you need a high-level map of definitions/usages across repos.
+  - id: pr_context_summary
+    summary: Build concise PR context from GitHub metadata and file list.
+    when_to_use: Use first for pull-request scoped analysis before deeper workflows.
     required_args:
-      - symbol
-    example: 'run_workflow_cli(command="cross_repo_trace --symbol UserService")'
+      - owner
+      - repo
+      - pr_number
+    example: 'run_workflow_cli(command="pr_context_summary --owner acme --repo checkout --pr-number 123")'
     description: |
-      Enumerates repositories, then performs lightweight definition and usage searches per repo.
-      Produces a compact cross-repo trace summary.
-    script_path: workflows/scripts/cross_repo_trace.py
+      Retrieves PR metadata and changed files from GitHub and returns a compact summary.
+      This is the baseline context workflow for PR-scoped sessions.
+    script_path: workflows/scripts/pr_context_summary.py
     arg_schema:
-      symbol:
+      owner:
         type: string
         required: true
-        description: Symbol or API token to trace.
-      max_repos:
+        description: Repository owner or organization.
+      repo:
+        type: string
+        required: true
+        description: Repository name.
+      pr_number:
         type: integer
-        required: false
-        default: 8
-        description: Maximum repositories to probe.
-      definitions_limit:
-        type: integer
-        required: false
-        default: 2
-        description: Max definition hits per repository.
-      usages_limit:
-        type: integer
-        required: false
-        default: 3
-        description: Max usage hits per repository.
+        required: true
+        minimum: 1
+        description: Pull request number.
     examples:
       - call: run_workflow_cli
         args:
-          command: cross_repo_trace --symbol FeatureFlagClient --max-repos 6
+          command: pr_context_summary --owner acme --repo checkout --pr-number 123
     constraints:
-      - Intended as a first-pass trace, not exhaustive indexing.
-      - Follow up with narrower workflows after identifying candidate repos.
+      - Requires GitHub API access (`GITHUB_TOKEN`).
+      - Returns compact file metadata, not full patches.
     expected_output_shape:
-      symbol: string
-      inspected_repos: integer
-      trace: list[object]
+      owner: string
+      repo: string
+      pr_number: integer
+      pr: object
+      summary: object
+      files: list[object]
+
+  - id: pr_change_surface
+    summary: Analyze PR change surface by status, directory, and extension.
+    when_to_use: Use after `pr_context_summary` to assess blast radius and review hotspots.
+    required_args:
+      - owner
+      - repo
+      - pr_number
+    example: 'run_workflow_cli(command="pr_change_surface --owner acme --repo checkout --pr-number 123")'
+    description: |
+      Builds a structured change-surface report from PR files.
+      Includes totals, status mix, touched directories, extension-level stats, and largest file changes.
+    script_path: workflows/scripts/pr_change_surface.py
+    arg_schema:
+      owner:
+        type: string
+        required: true
+        description: Repository owner or organization.
+      repo:
+        type: string
+        required: true
+        description: Repository name.
+      pr_number:
+        type: integer
+        required: true
+        minimum: 1
+        description: Pull request number.
+    examples:
+      - call: run_workflow_cli
+        args:
+          command: pr_change_surface --owner acme --repo checkout --pr-number 123
+    constraints:
+      - Requires GitHub API access (`GITHUB_TOKEN`).
+      - Designed for topology/impact analysis rather than patch-level semantics.
+    expected_output_shape:
+      owner: string
+      repo: string
+      pr_number: integer
+      totals: object
+      status_counts: list[object]
+      directory_counts: list[object]
+      extension_summary: list[object]
+      largest_files: list[object]
+
+  - id: pr_cross_repo_overlap_candidates
+    summary: Find lexical overlap candidates for cross-repo contract checks.
+    when_to_use: Use for candidate generation after PR change-surface analysis.
+    required_args:
+      - owner
+      - repo
+      - pr_number
+    example: 'run_workflow_cli(command="pr_cross_repo_overlap_candidates --owner acme --repo checkout --pr-number 123")'
+    description: |
+      Uses PR changed-file terms to probe indexed repositories for lexical overlap candidates.
+      By default, all indexed repositories are scanned and the canonical source repo is excluded.
+    script_path: workflows/scripts/pr_cross_repo_overlap_candidates.py
+    arg_schema:
+      owner:
+        type: string
+        required: true
+        description: Repository owner or organization.
+      repo:
+        type: string
+        required: true
+        description: Repository name.
+      pr_number:
+        type: integer
+        required: true
+        minimum: 1
+        description: Pull request number.
+      include_source_repo:
+        type: boolean
+        required: false
+        default: false
+        description: Include canonical source repo in scanning.
+      max_repos:
+        type: integer
+        required: false
+        default: 0
+        minimum: 0
+        description: Optional cap on scanned repositories. 0 scans all indexed repos.
+      per_term_limit:
+        type: integer
+        required: false
+        default: 3
+        minimum: 1
+        description: Max Zoekt hits captured per term/repo query.
+    examples:
+      - call: run_workflow_cli
+        args:
+          command: pr_cross_repo_overlap_candidates --owner acme --repo checkout --pr-number 123
+      - call: run_workflow_cli
+        args:
+          command: pr_cross_repo_overlap_candidates --owner acme --repo checkout --pr-number 123 --include-source-repo true
+    constraints:
+      - Defaults to all indexed repositories.
+      - Canonical source repo is excluded by default unless `include_source_repo=true`.
+      - Heuristic candidate detector; overlap hits are not confirmed contract conflicts.
+      - Always follow up with targeted workflows before reporting concrete cross-repo risk.
+    expected_output_shape:
+      owner: string
+      repo: string
+      pr_number: integer
+      include_source_repo: boolean
+      inspected_repo_count: integer
+      excluded_source_repos: list[string]
+      changed_files: list[string]
+      search_terms: list[string]
+      overlap_candidates: list[object]
+      confirmed_conflicts: list[object]
+      no_confirmed_conflicts: boolean
+      no_confirmed_conflicts_reason: string
+      validation_summary: object
+      errors: list[object]
 
 runtime_tools:
   - id: runtime.search
@@ -325,6 +438,68 @@ runtime_tools:
     expected_output_shape:
       repos: list[string]
 
+  - id: runtime.github_get_pull_request
+    summary: Fetch GitHub pull request metadata.
+    when_to_use: Use when workflow code needs PR metadata (title/state/base/head/stats).
+    required_args:
+      - owner
+      - repo
+      - pr_number
+    example: 'runtime.github_tools.get_pull_request(owner="acme", repo="checkout", pr_number=123)'
+    description: Retrieve pull request metadata from GitHub REST API.
+    arg_schema:
+      owner:
+        type: string
+        required: true
+      repo:
+        type: string
+        required: true
+      pr_number:
+        type: integer
+        required: true
+    examples:
+      - call: runtime.github_tools.get_pull_request
+        args:
+          owner: acme
+          repo: checkout
+          pr_number: 123
+    constraints:
+      - Requires `GITHUB_TOKEN`.
+      - Uses retry handling for transient API failures.
+    expected_output_shape:
+      pull_request: object
+
+  - id: runtime.github_list_pull_request_files
+    summary: Fetch complete GitHub pull request file list.
+    when_to_use: Use when workflow code needs changed files for PR-level analysis.
+    required_args:
+      - owner
+      - repo
+      - pr_number
+    example: 'runtime.github_tools.list_pull_request_files(owner="acme", repo="checkout", pr_number=123)'
+    description: List pull request files from GitHub REST API with pagination handling.
+    arg_schema:
+      owner:
+        type: string
+        required: true
+      repo:
+        type: string
+        required: true
+      pr_number:
+        type: integer
+        required: true
+    examples:
+      - call: runtime.github_tools.list_pull_request_files
+        args:
+          owner: acme
+          repo: checkout
+          pr_number: 123
+    constraints:
+      - Requires `GITHUB_TOKEN`.
+      - Handles API pagination and retry logic.
+    expected_output_shape:
+      files: list[object]
+
 execution_patterns:
   - id: execution.run_workflow_cli
     summary: Preferred path for repeatable analysis tasks.
@@ -361,15 +536,14 @@ execution_patterns:
     example: 'run_custom_workflow_code(code="...")'
     description: |
       Execute generated code after AST safety checks in an isolated subprocess.
-      Preferred entrypoint shape is `run(args)` or `async run(args)`.
-      Legacy `parse_args/main/__main__` scripts are still accepted.
+      Code is executed directly as a script (`__main__`).
+      Runtime helper details are provided in `read_capability(execution.run_custom_workflow_code)`.
+      Use self-contained code and emit output via stdout:
+      plain text, plain JSON, or `__RESULT_JSON__=<json>` marker (optional).
     arg_schema:
       code:
         type: string
         required: true
-      args:
-        type: object
-        required: false
       timeout_seconds:
         type: integer
         required: false
@@ -377,17 +551,18 @@ execution_patterns:
       - call: run_custom_workflow_code
         args:
           code: |
-            import asyncio
-            from runtime import zoekt_tools
+            import json
+            from runtime import github_tools
 
-            async def run(args):
-                query = str(args.get("query", "")).strip()
-                results = await asyncio.to_thread(zoekt_tools.search, query, 5, 1)
-                return {"results": results}
+            pr = github_tools.get_pull_request("acme", "checkout", 123)
+            print(json.dumps({"title": pr.get("title", "")}, ensure_ascii=True))
     constraints:
-      - Allowed imports are restricted (argparse/asyncio/json/sys/runtime helpers via
-        `from runtime import zoekt_tools` or `import runtime.zoekt_tools as zoekt_tools`).
-      - Banned imports and calls are rejected before execution.
+      - >
+        Import policy: custom code may import only approved modules from the safety allowlist.
+        Use runtime helpers via `from runtime import zoekt_tools, github_tools`,
+        `import runtime.zoekt_tools as zoekt_tools`, or `import runtime.github_tools as github_tools`.
+      - Any other imports and banned calls are rejected before execution.
+      - For best structured outputs, print JSON or marker JSON; plain text stdout is also accepted.
       - This is process-level isolation, not container-grade sandboxing.
     expected_output_shape:
       success: boolean

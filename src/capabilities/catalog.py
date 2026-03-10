@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 import yaml
 
-from .models import CapabilityDoc, CapabilityHit
+from .models import CapabilityDoc, CapabilityHit, RuntimeHelperDoc
 
 
 class CapabilityCatalog:
@@ -11,6 +11,7 @@ class CapabilityCatalog:
         self.manifest_path = manifest_path
         self._docs: dict[str, CapabilityDoc] = {}
         self._hit_metadata: dict[str, dict[str, Any]] = {}
+        self._runtime_helpers: list[RuntimeHelperDoc] = []
         self._load_manifest()
 
     def _load_manifest(self) -> None:
@@ -25,10 +26,9 @@ class CapabilityCatalog:
             docs[capability_id] = self._entry_to_doc(workflow, kind="workflow")
             hit_metadata[capability_id] = self._entry_to_hit_metadata(workflow)
 
+        runtime_helpers: list[RuntimeHelperDoc] = []
         for runtime_tool in raw.get("runtime_tools", []):
-            capability_id = runtime_tool["id"]
-            docs[capability_id] = self._entry_to_doc(runtime_tool, kind="runtime_tool")
-            hit_metadata[capability_id] = self._entry_to_hit_metadata(runtime_tool)
+            runtime_helpers.append(self._entry_to_runtime_helper(runtime_tool))
 
         for pattern in raw.get("execution_patterns", []):
             capability_id = pattern["id"]
@@ -37,6 +37,7 @@ class CapabilityCatalog:
 
         self._docs = docs
         self._hit_metadata = hit_metadata
+        self._runtime_helpers = runtime_helpers
 
     @staticmethod
     def _entry_to_doc(entry: dict[str, Any], kind: str) -> CapabilityDoc:
@@ -59,11 +60,25 @@ class CapabilityCatalog:
             "example": entry.get("example", ""),
         }
 
+    @staticmethod
+    def _entry_to_runtime_helper(entry: dict[str, Any]) -> RuntimeHelperDoc:
+        return RuntimeHelperDoc(
+            id=entry["id"],
+            summary=entry.get("summary", ""),
+            arg_schema=entry.get("arg_schema", {}),
+            examples=entry.get("examples", []),
+        )
+
     def list_capabilities(self) -> list[CapabilityHit]:
         return [self._doc_to_hit(doc, self._hit_metadata.get(doc.id)) for doc in self._docs.values()]
 
     def read(self, capability_id: str) -> CapabilityDoc | None:
+        if capability_id.startswith("runtime."):
+            return None
         return self._docs.get(capability_id)
+
+    def runtime_helpers(self) -> list[RuntimeHelperDoc]:
+        return list(self._runtime_helpers)
 
     @staticmethod
     def _doc_to_hit(doc: CapabilityDoc, metadata: dict[str, Any] | None = None) -> CapabilityHit:
@@ -80,8 +95,8 @@ class CapabilityCatalog:
         if not example and doc.examples:
             example = str(doc.examples[0].get("call") or doc.examples[0].get("args") or "")
 
-        kind: Literal["workflow", "runtime_tool", "execution_pattern"] = "execution_pattern"
-        if doc.kind in {"workflow", "runtime_tool", "execution_pattern"}:
+        kind: Literal["workflow", "execution_pattern"] = "execution_pattern"
+        if doc.kind in {"workflow", "execution_pattern"}:
             kind = doc.kind
         return CapabilityHit(
             id=doc.id,

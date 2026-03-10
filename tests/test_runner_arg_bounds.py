@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,60 @@ def test_parse_workflow_cli_applies_default_and_keeps_it_bounded(tmp_path: Path)
 
     assert workflow_id == "symbol_usage"
     assert args["context_lines"] == 2
+
+
+def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
+    argv = ExecutionRunner._build_cli_argv_tokens(
+        {
+            "include_source_repo": False,
+            "max_repos": 5,
+            "query": "ProcessOrder",
+        }
+    )
+
+    assert "--include-source-repo" in argv
+    assert "--max-repos" in argv
+    assert "--query" in argv
+    assert "false" in argv
+    assert "5" in argv
+    assert "ProcessOrder" in argv
+
+
+def test_run_custom_workflow_code_accepts_plain_text_stdout() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    runner = ExecutionRunner(
+        src_root=project_root / "src",
+        manifest_path=project_root / "src" / "workflows" / "manifest.yaml",
+        timeout_default=30,
+        timeout_max=120,
+        stdout_max_bytes=32768,
+        stderr_max_bytes=32768,
+    )
+
+    result = asyncio.run(runner.run_custom_workflow_code(code="print('hello world')", timeout_seconds=30))
+
+    assert result.success is True
+    assert result.result_json == "hello world"
+    assert "result marker not found" not in (result.stderr or "").lower()
+
+
+def test_run_custom_workflow_code_accepts_plain_json_stdout() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    runner = ExecutionRunner(
+        src_root=project_root / "src",
+        manifest_path=project_root / "src" / "workflows" / "manifest.yaml",
+        timeout_default=30,
+        timeout_max=120,
+        stdout_max_bytes=32768,
+        stderr_max_bytes=32768,
+    )
+
+    result = asyncio.run(
+        runner.run_custom_workflow_code(
+            code="import json\nprint(json.dumps({'ok': True, 'count': 2}, ensure_ascii=True))",
+            timeout_seconds=30,
+        )
+    )
+
+    assert result.success is True
+    assert result.result_json == {"ok": True, "count": 2}

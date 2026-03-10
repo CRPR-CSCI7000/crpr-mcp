@@ -46,7 +46,9 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
         "symbol_definition": _render_symbol_search_result,
         "symbol_usage": _render_symbol_search_result,
         "file_context_reader": _render_file_context_result,
-        "cross_repo_trace": _render_cross_repo_trace_result,
+        "pr_context_summary": _render_pr_context_summary_result,
+        "pr_change_surface": _render_pr_change_surface_result,
+        "pr_cross_repo_overlap_candidates": _render_pr_cross_repo_overlap_candidates_result,
     }
     renderer = workflow_renderers.get(workflow_id, _render_generic_workflow_result)
     body = renderer(payload)
@@ -136,51 +138,142 @@ def _render_file_context_result(payload: Any) -> list[str]:
     return lines
 
 
-def _render_cross_repo_trace_result(payload: Any) -> list[str]:
+def _render_pr_context_summary_result(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return _render_generic_workflow_result(payload)
 
-    symbol = str(payload.get("symbol", "")).strip()
-    inspected_repos = _coerce_int(payload.get("inspected_repos"), default=0)
-    trace = payload.get("trace") if isinstance(payload.get("trace"), list) else []
-    errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+    owner = str(payload.get("owner", "")).strip()
+    repo = str(payload.get("repo", "")).strip()
+    pr_number = _coerce_int(payload.get("pr_number"), default=0)
+    pr = payload.get("pr") if isinstance(payload.get("pr"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    files = payload.get("files") if isinstance(payload.get("files"), list) else []
+
+    title = str(pr.get("title", "")).strip()
+    changed_files = _coerce_int(pr.get("changed_files"), default=len(files))
+    additions = _coerce_int(pr.get("additions"), default=0)
+    deletions = _coerce_int(pr.get("deletions"), default=0)
 
     lines = [
-        f"Cross-repo trace for `{symbol}` across `{inspected_repos}` repos." if symbol else f"Cross-repo trace across `{inspected_repos}` repos.",
-        "",
+        f"PR `{owner}/{repo}#{pr_number}` context summary." if owner and repo else "PR context summary.",
+        f"- Title: {title or '(untitled)'}",
+        f"- Changed files: `{changed_files}`",
+        f"- Additions/Deletions: `{additions}` / `{deletions}`",
     ]
-    if not trace:
-        lines.append("No trace results found.")
+
+    top_extensions = summary.get("top_extensions") if isinstance(summary.get("top_extensions"), list) else []
+    if top_extensions:
+        lines.extend(["", "### Top Extensions"])
+        for entry in top_extensions[:8]:
+            if isinstance(entry, dict):
+                lines.append(f"- `{entry.get('name', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
+
+    top_directories = summary.get("top_directories") if isinstance(summary.get("top_directories"), list) else []
+    if top_directories:
+        lines.extend(["", "### Top Directories"])
+        for entry in top_directories[:8]:
+            if isinstance(entry, dict):
+                lines.append(f"- `{entry.get('name', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
+    return lines
+
+
+def _render_pr_change_surface_result(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return _render_generic_workflow_result(payload)
+
+    owner = str(payload.get("owner", "")).strip()
+    repo = str(payload.get("repo", "")).strip()
+    pr_number = _coerce_int(payload.get("pr_number"), default=0)
+    totals = payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
+    status_counts = payload.get("status_counts") if isinstance(payload.get("status_counts"), list) else []
+    directory_counts = payload.get("directory_counts") if isinstance(payload.get("directory_counts"), list) else []
+    largest_files = payload.get("largest_files") if isinstance(payload.get("largest_files"), list) else []
+
+    lines = [
+        f"PR `{owner}/{repo}#{pr_number}` change surface." if owner and repo else "PR change surface.",
+        f"- Files changed: `{_coerce_int(totals.get('files_changed'), default=len(largest_files))}`",
+        f"- Additions/Deletions: `{_coerce_int(totals.get('additions'), 0)}` / `{_coerce_int(totals.get('deletions'), 0)}`",
+    ]
+
+    if status_counts:
+        lines.extend(["", "### Status Mix"])
+        for entry in status_counts[:8]:
+            if isinstance(entry, dict):
+                lines.append(f"- `{entry.get('status', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
+
+    if directory_counts:
+        lines.extend(["", "### Directories"])
+        for entry in directory_counts[:10]:
+            if isinstance(entry, dict):
+                lines.append(f"- `{entry.get('directory', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
+
+    if largest_files:
+        lines.extend(["", "### Largest File Deltas"])
+        for entry in largest_files[:10]:
+            if isinstance(entry, dict):
+                filename = str(entry.get("filename", "(unknown)"))
+                changes = _coerce_int(entry.get("changes"), 0)
+                lines.append(f"- `{filename}`: `{changes}` changes")
+    return lines
+
+
+def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return _render_generic_workflow_result(payload)
+
+    owner = str(payload.get("owner", "")).strip()
+    repo = str(payload.get("repo", "")).strip()
+    pr_number = _coerce_int(payload.get("pr_number"), default=0)
+    inspected_repo_count = _coerce_int(payload.get("inspected_repo_count"), default=0)
+    overlap_candidates = (
+        payload.get("overlap_candidates") if isinstance(payload.get("overlap_candidates"), list) else []
+    )
+    confirmed_conflicts = (
+        payload.get("confirmed_conflicts") if isinstance(payload.get("confirmed_conflicts"), list) else []
+    )
+    no_confirmed_conflicts = bool(payload.get("no_confirmed_conflicts", False))
+    no_confirmed_conflicts_reason = str(payload.get("no_confirmed_conflicts_reason", "")).strip()
+    excluded_source_repos = (
+        payload.get("excluded_source_repos") if isinstance(payload.get("excluded_source_repos"), list) else []
+    )
+
+    lines = [
+        f"PR `{owner}/{repo}#{pr_number}` cross-repo overlap scan." if owner and repo else "Cross-repo overlap scan.",
+        f"- Repositories inspected: `{inspected_repo_count}`",
+        f"- Overlap candidates (unvalidated): `{len(overlap_candidates)}`",
+        f"- Confirmed conflicts: `{len(confirmed_conflicts)}`",
+    ]
+    if no_confirmed_conflicts:
+        lines.append(f"- No confirmed conflicts: `true` ({no_confirmed_conflicts_reason or 'no_reason_provided'})")
     else:
-        for index, repo_entry in enumerate(trace, start=1):
-            if not isinstance(repo_entry, dict):
+        lines.append("- No confirmed conflicts: `false`")
+    if excluded_source_repos:
+        lines.append("- Source repos excluded by default:")
+        lines.extend([f"  - `{source_repo}`" for source_repo in excluded_source_repos[:5]])
+
+    if confirmed_conflicts:
+        lines.extend(["", "### Confirmed Conflicts"])
+        for entry in confirmed_conflicts[:10]:
+            if not isinstance(entry, dict):
                 continue
-            repo = str(repo_entry.get("repo", "(unknown repo)"))
-            definition_hits = _coerce_int(repo_entry.get("definition_hits"), default=0)
-            usage_hits = _coerce_int(repo_entry.get("usage_hits"), default=0)
-            lines.extend(
-                [
-                    f"### {index}. `{repo}`",
-                    f"- Definition hits: `{definition_hits}`",
-                    f"- Usage hits: `{usage_hits}`",
-                ]
+            conflict_repo = str(entry.get("repo", "(unknown)"))
+            total_hits = _coerce_int(entry.get("total_hits"), default=0)
+            evidence_count = _coerce_int(entry.get("contract_evidence_count"), default=0)
+            lines.append(
+                f"- `{conflict_repo}`: `{evidence_count}` contract evidence samples (`{total_hits}` total overlap hits)"
             )
 
-            definitions = repo_entry.get("definitions") if isinstance(repo_entry.get("definitions"), list) else []
-            usages = repo_entry.get("usages") if isinstance(repo_entry.get("usages"), list) else []
-            if definitions:
-                lines.extend(["- Sample definitions:", *_indent_markdown(_render_search_results(definitions, max_files=2))])
-            if usages:
-                lines.extend(["- Sample usages:", *_indent_markdown(_render_search_results(usages, max_files=2))])
-
-    if errors:
-        lines.extend(["", "### Errors"])
-        for error in errors:
-            if isinstance(error, dict):
-                lines.append(f"- `{error.get('repo', '(unknown repo)')}`: {error.get('error', '(unknown error)')}")
-            else:
-                lines.append(f"- {error}")
-
+    if overlap_candidates:
+        lines.extend(["", "### Top Overlap Candidate Repos (Unvalidated)"])
+        for entry in overlap_candidates[:10]:
+            if not isinstance(entry, dict):
+                continue
+            conflict_repo = str(entry.get("repo", "(unknown)"))
+            total_hits = _coerce_int(entry.get("total_hits"), default=0)
+            term_matches = entry.get("term_matches") if isinstance(entry.get("term_matches"), list) else []
+            lines.append(f"- `{conflict_repo}`: `{total_hits}` total hits (`{len(term_matches)}` matched terms)")
+    else:
+        lines.extend(["", "No cross-repo overlap candidates found."])
     return lines
 
 

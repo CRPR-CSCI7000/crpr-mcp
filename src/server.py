@@ -3,16 +3,17 @@ import json
 import logging
 import pathlib
 import signal
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .capabilities import CapabilityCatalog, CapabilityDoc, CapabilityHit
+from .capabilities import CapabilityCatalog, CapabilityDoc, CapabilityHit, RuntimeHelperDoc
 from .config import ServerConfig
 from .execution import CustomWorkflowCodeRunRequest, ExecutionResult, ExecutionRunner, WorkflowCliRunRequest
+from .execution.safety import get_allowed_runtime_modules
 from .prompts import PromptManager
 from .workflows import format_workflow_result_markdown
 
@@ -51,7 +52,7 @@ class ZoektMCPServer:
         self.list_capabilities_description = self._load_prompt_with_default(
             prompt_manager,
             "tools.list_capabilities",
-            "List available workflow/runtime execution capabilities.",
+            "List available workflow and execution-pattern capabilities.",
         )
         self.read_capability_description = self._load_prompt_with_default(
             prompt_manager,
@@ -84,12 +85,19 @@ class ZoektMCPServer:
         logger.info("Received signal %s, initiating graceful shutdown...", sig)
         self._shutdown_requested = True
 
-    async def list_capabilities(self) -> str:
+    async def list_capabilities(
+        self,
+        view: Literal["capabilities", "runtime_helpers"] = "capabilities",
+    ) -> str:
         if self._shutdown_requested:
             logger.info("Shutdown in progress, declining new capability list requests")
             return "## Capability List\n\nServer is shutting down."
 
         try:
+            if view == "runtime_helpers":
+                helpers = await asyncio.to_thread(self.capability_catalog.runtime_helpers)
+                return self._format_runtime_helper_list_markdown(helpers=helpers)
+
             hits = await asyncio.to_thread(self.capability_catalog.list_capabilities)
             return self._format_capability_list_markdown(hits=hits)
         except Exception as exc:
@@ -106,7 +114,18 @@ class ZoektMCPServer:
             capability = await asyncio.to_thread(self.capability_catalog.read, capability_id)
             if capability is None:
                 capability = self._error_capability_doc(capability_id, f"unknown capability_id: {capability_id}")
-            return self._format_capability_doc_markdown(capability)
+
+            runtime_helpers: list[RuntimeHelperDoc] | None = None
+            allowed_runtime_modules: list[str] | None = None
+            if capability.id == "execution.run_custom_workflow_code" and capability.kind != "error":
+                runtime_helpers = await asyncio.to_thread(self.capability_catalog.runtime_helpers)
+                allowed_runtime_modules = get_allowed_runtime_modules()
+
+            return self._format_capability_doc_markdown(
+                capability,
+                runtime_helpers=runtime_helpers,
+                allowed_runtime_modules=allowed_runtime_modules,
+            )
         except Exception as exc:
             logger.error("read_capability failed: %s", exc)
             return self._format_capability_doc_markdown(
@@ -156,7 +175,6 @@ class ZoektMCPServer:
     async def run_custom_workflow_code(
         self,
         code: str,
-        args: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
     ) -> str:
         if self._shutdown_requested:
@@ -168,7 +186,6 @@ class ZoektMCPServer:
         try:
             request = CustomWorkflowCodeRunRequest(
                 code=code,
-                args=args or {},
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
@@ -180,7 +197,6 @@ class ZoektMCPServer:
         try:
             result = await self.execution_runner.run_custom_workflow_code(
                 code=request.code,
-                args=request.args,
                 timeout_seconds=request.timeout_seconds,
             )
             return self._format_execution_result_markdown("Custom Workflow Code Execution", result)
@@ -223,28 +239,106 @@ class ZoektMCPServer:
     def _format_capability_list_markdown(hits: list[CapabilityHit]) -> str:
         lines = ["## Capability List", "", f"- Total: `{len(hits)}`", ""]
         lines.extend(ZoektMCPServer._capability_kind_legend())
-        lines.append("")
+        lines.extend(
+            [
+                "",
+                "### Discovery Policy",
+                "- Always call `read_capability` before using any capability from this list.",
+                "- `list_capabilities` is intentionally brief and omits arg schemas/examples/constraints.",
+                "- Do not execute capabilities from list output alone; use `read_capability` first.",
+                "",
+            ]
+        )
         if not hits:
             lines.append("No capabilities available.")
             return "\n".join(lines)
 
         for index, hit in enumerate(hits, start=1):
-            required_args = ", ".join(hit.required_args) if hit.required_args else "(none)"
             lines.extend(
                 [
                     f"### {index}. `{hit.id}`",
                     f"- Kind: `{hit.kind}`",
                     f"- Summary: {hit.summary}",
                     f"- When to use: {hit.when_to_use}",
-                    f"- Required args: `{required_args}`",
-                    f"- Example: `{hit.example}`" if hit.example else "- Example: (none)",
+                    f"- Next step: `read_capability(capability_id=\"{hit.id}\")`",
+                    "- Interface details intentionally omitted here; use `read_capability`.",
                     "",
                 ]
             )
         return "\n".join(lines).rstrip()
 
     @staticmethod
-    def _format_capability_doc_markdown(capability: CapabilityDoc) -> str:
+    def _format_runtime_helper_list_markdown(
+        helpers: list[RuntimeHelperDoc],
+        *,
+        include_header: bool = True,
+        include_policy: bool = True,
+        detailed: bool = False,
+        empty_message: str = "No runtime helpers available.",
+    ) -> str:
+        lines: list[str] = []
+        if include_header:
+            lines.extend(["## Runtime Helper List", "", f"- Total: `{len(helpers)}`", ""])
+
+        if include_policy:
+            lines.extend(
+                [
+                    "### Discovery Policy",
+                    "- This list is intentionally brief.",
+                    "- For full helper schemas/examples, call `read_capability(capability_id=\"execution.run_custom_workflow_code\")`.",
+                    "- Before custom-code execution, always read that capability document.",
+                    "",
+                ]
+            )
+
+        if not helpers:
+            lines.append(empty_message)
+            return "\n".join(lines).rstrip()
+
+        for index, helper in enumerate(helpers, start=1):
+            if not detailed:
+                lines.extend(
+                    [
+                        f"### {index}. `{helper.id}`",
+                        f"- Summary: {helper.summary or '(none)'}",
+                        "- Details: use `read_capability(capability_id=\"execution.run_custom_workflow_code\")`",
+                        "",
+                    ]
+                )
+                continue
+
+            signature = ZoektMCPServer._runtime_helper_signature(helper)
+            parameters = ZoektMCPServer._runtime_helper_parameter_lines(helper)
+            examples = ZoektMCPServer._runtime_helper_example_calls(helper)
+            lines.extend(
+                [
+                    f"#### `{helper.id}`",
+                    f"- Summary: {helper.summary or '(none)'}",
+                    "- Signature:",
+                    "```python",
+                    signature,
+                    "```",
+                    "- Parameters:",
+                ]
+            )
+            if parameters:
+                lines.extend(parameters)
+            else:
+                lines.append("- (none)")
+
+            if examples:
+                lines.extend(["- Examples:", "```python", *examples, "```", ""])
+            else:
+                lines.extend(["- Examples: (none)", ""])
+
+        return "\n".join(lines).rstrip()
+
+    @staticmethod
+    def _format_capability_doc_markdown(
+        capability: CapabilityDoc,
+        runtime_helpers: list[RuntimeHelperDoc] | None = None,
+        allowed_runtime_modules: list[str] | None = None,
+    ) -> str:
         lines = [f"## Capability: `{capability.id}`", "", f"- Kind: `{capability.kind}`", ""]
         lines.extend(ZoektMCPServer._capability_kind_legend())
         lines.append("")
@@ -280,14 +374,109 @@ class ZoektMCPServer:
                 "```",
             ]
         )
+
+        if runtime_helpers is not None:
+            lines.extend(["", "### Runtime Helpers"])
+            modules = allowed_runtime_modules or []
+            lines.append("Allowed runtime modules:")
+            if modules:
+                lines.extend([f"- `{module}`" for module in modules])
+            else:
+                lines.append("- (none)")
+            runtime_helper_markdown = ZoektMCPServer._format_runtime_helper_list_markdown(
+                runtime_helpers,
+                include_header=False,
+                include_policy=False,
+                detailed=True,
+                empty_message="No runtime helpers registered.",
+            )
+            lines.extend(["", *runtime_helper_markdown.splitlines()])
         return "\n".join(lines)
+
+    @staticmethod
+    def _runtime_helper_signature(helper: RuntimeHelperDoc) -> str:
+        call_name = helper.id
+        if helper.examples:
+            first_example = helper.examples[0]
+            if isinstance(first_example, dict):
+                example_call = first_example.get("call")
+                if isinstance(example_call, str) and example_call.strip():
+                    call_name = example_call.strip()
+
+        params: list[str] = []
+        for arg_name, arg_schema in helper.arg_schema.items():
+            schema = arg_schema if isinstance(arg_schema, dict) else {}
+            arg_type = ZoektMCPServer._schema_type_to_python(schema.get("type"))
+            if schema.get("required"):
+                params.append(f"{arg_name}: {arg_type}")
+                continue
+            if "default" in schema:
+                params.append(f"{arg_name}: {arg_type} = {ZoektMCPServer._python_literal(schema.get('default'))}")
+                continue
+            params.append(f"{arg_name}: {arg_type} | None = None")
+
+        return f"{call_name}({', '.join(params)}) -> Any"
+
+    @staticmethod
+    def _runtime_helper_parameter_lines(helper: RuntimeHelperDoc) -> list[str]:
+        lines: list[str] = []
+        for arg_name, arg_schema in helper.arg_schema.items():
+            schema = arg_schema if isinstance(arg_schema, dict) else {}
+            arg_type = ZoektMCPServer._schema_type_to_python(schema.get("type"))
+            required_text = "required" if schema.get("required") else "optional"
+            description = str(schema.get("description", "")).strip()
+            default = schema.get("default")
+
+            detail_parts = [f"`{arg_name}` (`{arg_type}`, {required_text})"]
+            if "default" in schema:
+                detail_parts.append(f"default `{ZoektMCPServer._python_literal(default)}`")
+            if description:
+                detail_parts.append(description)
+            lines.append(f"- {'; '.join(detail_parts)}")
+        return lines
+
+    @staticmethod
+    def _runtime_helper_example_calls(helper: RuntimeHelperDoc) -> list[str]:
+        calls: list[str] = []
+        for example in helper.examples:
+            if not isinstance(example, dict):
+                continue
+            call_name = example.get("call")
+            if not isinstance(call_name, str) or not call_name.strip():
+                continue
+            args = example.get("args")
+            if not isinstance(args, dict) or not args:
+                calls.append(f"{call_name.strip()}()")
+                continue
+
+            call_args = ", ".join(f"{key}={ZoektMCPServer._python_literal(value)}" for key, value in args.items())
+            calls.append(f"{call_name.strip()}({call_args})")
+        return calls
+
+    @staticmethod
+    def _schema_type_to_python(schema_type: Any) -> str:
+        mapping = {
+            "string": "str",
+            "integer": "int",
+            "number": "float",
+            "boolean": "bool",
+            "object": "dict[str, Any]",
+            "array": "list[Any]",
+        }
+        key = str(schema_type or "").strip().lower()
+        return mapping.get(key, "Any")
+
+    @staticmethod
+    def _python_literal(value: Any) -> str:
+        if isinstance(value, str):
+            return repr(value)
+        return repr(value)
 
     @staticmethod
     def _capability_kind_legend() -> list[str]:
         return [
             "### Capability Types",
             "- `workflow`: prebuilt analysis flows invoked with `run_workflow_cli`.",
-            "- `runtime_tool`: Python helpers available in custom code via `from runtime import zoekt_tools`.",
             "- `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).",
         ]
 

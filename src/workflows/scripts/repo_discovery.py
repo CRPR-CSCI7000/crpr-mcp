@@ -9,26 +9,19 @@ RESULT_MARKER = "__RESULT_JSON__="
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Discover candidate repositories for an objective.")
-    parser.add_argument("--args-json", required=True, help="JSON object for workflow args")
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--limit", type=int, default=10)
     return parser.parse_args(argv)
-
-
-def _ensure_mapping(raw: str) -> dict:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise ValueError("args-json must decode to an object")
-    return payload
 
 
 async def main():
     try:
         cli = parse_args()
-        payload = _ensure_mapping(cli.args_json)
-        query = str(payload.get("query", "")).strip()
+        query = str(cli.query).strip()
         if not query:
             raise ValueError("missing required arg: query")
 
-        limit = int(payload.get("limit", 10))
+        limit = int(cli.limit)
         repo_query = query if "type:repo" in query else f"{query} type:repo"
         results = await asyncio.to_thread(zoekt_tools.search, repo_query, limit, 0)
 

@@ -1,7 +1,5 @@
-import argparse
 import asyncio
 import importlib.util
-import json
 from pathlib import Path
 
 
@@ -18,9 +16,13 @@ def _load_file_context_reader_module():
 file_context_reader = _load_file_context_reader_module()
 
 
-def _set_args_json(monkeypatch, payload: dict[str, object]) -> None:
-    args_json = json.dumps(payload)
-    monkeypatch.setattr(file_context_reader, "parse_args", lambda argv=None: argparse.Namespace(args_json=args_json))
+def _set_cli_args(monkeypatch, payload: dict[str, object]) -> None:
+    argv: list[str] = []
+    for key, value in payload.items():
+        argv.append(f"--{key.replace('_', '-')}")
+        argv.append(str(value))
+    original_parse_args = file_context_reader.parse_args
+    monkeypatch.setattr(file_context_reader, "parse_args", lambda argv_override=None: original_parse_args(argv))
 
 
 def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> None:
@@ -30,7 +32,7 @@ def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> N
         call_log.append((repo, path, start_line, end_line))
         return "line content"
 
-    _set_args_json(
+    _set_cli_args(
         monkeypatch,
         {
             "repo": "github.com/org/repo",
@@ -56,7 +58,7 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
         called["fetch_content"] = True
         return "unused"
 
-    _set_args_json(
+    _set_cli_args(
         monkeypatch,
         {
             "repo": "github.com/org/repo",

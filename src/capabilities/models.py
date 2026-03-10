@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class CapabilityHit(BaseModel):
     id: str
-    kind: Literal["workflow", "runtime_tool", "execution_pattern"]
+    kind: Literal["workflow", "execution_pattern"]
     summary: str
     when_to_use: str
     required_args: list[str] = Field(default_factory=list)
@@ -20,3 +20,10 @@ class CapabilityDoc(BaseModel):
     examples: list[dict[str, Any]] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     expected_output_shape: dict[str, Any] = Field(default_factory=dict)
+
+
+class RuntimeHelperDoc(BaseModel):
+    id: str
+    summary: str
+    arg_schema: dict[str, Any] = Field(default_factory=dict)
+    examples: list[dict[str, Any]] = Field(default_factory=list)

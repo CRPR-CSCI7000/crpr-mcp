@@ -10,27 +10,21 @@ MAX_CONTEXT_LINES = 2
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Find symbol usage call-sites.")
-    parser.add_argument("--args-json", required=True, help="JSON object for workflow args")
+    parser.add_argument("--query", required=True)
+    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--context-lines", type=int, default=2)
     return parser.parse_args(argv)
-
-
-def _ensure_mapping(raw: str) -> dict:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise ValueError("args-json must decode to an object")
-    return payload
 
 
 async def main():
     try:
         cli = parse_args()
-        payload = _ensure_mapping(cli.args_json)
-        query = str(payload.get("query", "")).strip()
+        query = str(cli.query).strip()
         if not query:
             raise ValueError("missing required arg: query")
 
-        limit = int(payload.get("limit", 10))
-        context_lines = int(payload.get("context_lines", 2))
+        limit = int(cli.limit)
+        context_lines = int(cli.context_lines)
         if context_lines < 0 or context_lines > MAX_CONTEXT_LINES:
             raise ValueError(f"context_lines must be between 0 and {MAX_CONTEXT_LINES}")
         results = await asyncio.to_thread(zoekt_tools.search, query, limit, context_lines)

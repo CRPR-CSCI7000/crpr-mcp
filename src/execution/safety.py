@@ -3,12 +3,26 @@ import ast
 _ALLOWED_IMPORTS = {
     "argparse",
     "asyncio",
+    "collections",
+    "dataclasses",
+    "datetime",
+    "difflib",
+    "functools",
+    "itertools",
     "json",
+    "math",
+    "re",
     "sys",
+    "statistics",
+    "string",
+    "textwrap",
+    "typing",
+    "runtime.github_tools",
     "runtime.zoekt_tools",
 }
 
 _ALLOWED_RUNTIME_FROM_IMPORTS = {
+    "github_tools",
     "zoekt_tools",
 }
 
@@ -48,24 +62,7 @@ def validate_custom_workflow_code(code: str) -> list[str]:
 
     rejections: list[str] = []
 
-    has_parse_args = False
-    has_main = False
-    has_main_guard = False
-    has_run = False
-
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "parse_args":
-            has_parse_args = True
-
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main":
-            has_main = True
-
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
-            has_run = True
-
-        if isinstance(node, ast.If) and _is_name_main_guard(node.test):
-            has_main_guard = True
-
         if isinstance(node, ast.Import):
             for alias in node.names:
                 module_name = alias.name
@@ -85,18 +82,6 @@ def validate_custom_workflow_code(code: str) -> list[str]:
             if call_name in _BANNED_CALLS:
                 rejections.append(f"banned_call: {call_name}")
 
-    has_legacy_entrypoint = has_parse_args and has_main and has_main_guard
-    has_minimal_entrypoint = has_run
-    if not has_minimal_entrypoint and not has_legacy_entrypoint:
-        if not has_run:
-            rejections.append("missing_required_entrypoint: run(args) or async run(args)")
-        if not has_parse_args:
-            rejections.append("missing_required_entrypoint: parse_args (legacy mode)")
-        if not has_main:
-            rejections.append("missing_required_entrypoint: main (legacy mode)")
-        if not has_main_guard:
-            rejections.append("missing_required_entrypoint: if __name__ == '__main__' (legacy mode)")
-
     seen: set[str] = set()
     unique_rejections: list[str] = []
     for rejection in rejections:
@@ -109,6 +94,12 @@ def validate_custom_workflow_code(code: str) -> list[str]:
 
 def validate_ephemeral_script(code: str) -> list[str]:
     return validate_custom_workflow_code(code)
+
+
+def get_allowed_runtime_modules() -> list[str]:
+    modules = {module for module in _ALLOWED_IMPORTS if module.startswith("runtime.")}
+    modules.update(f"runtime.{name}" for name in _ALLOWED_RUNTIME_FROM_IMPORTS)
+    return sorted(modules)
 
 
 def _check_import(module_name: str, rejections: list[str]) -> None:
@@ -128,25 +119,12 @@ def _check_import(module_name: str, rejections: list[str]) -> None:
     rejections.append(f"disallowed_import: {module_name}")
 
 
-def _is_name_main_guard(test: ast.expr) -> bool:
-    if not isinstance(test, ast.Compare):
-        return False
-    if not isinstance(test.left, ast.Name) or test.left.id != "__name__":
-        return False
-    if len(test.ops) != 1 or not isinstance(test.ops[0], ast.Eq):
-        return False
-    if len(test.comparators) != 1:
-        return False
-
-    comparator = test.comparators[0]
-    if isinstance(comparator, ast.Constant):
-        return comparator.value == "__main__"
-    return False
-
-
 def _call_name(node: ast.Call) -> str | None:
     if isinstance(node.func, ast.Name):
         return node.func.id
     if isinstance(node.func, ast.Attribute):
-        return node.func.attr
+        # Ban builtin calls even when referenced through the builtin namespace.
+        if isinstance(node.func.value, ast.Name) and node.func.value.id in {"builtins", "__builtins__"}:
+            return node.func.attr
+        return None
     return None
