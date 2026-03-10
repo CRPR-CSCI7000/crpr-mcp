@@ -69,6 +69,11 @@ class CrprMCPServer:
             "tools.run_custom_workflow_code",
             "Run custom workflow code in an isolated subprocess with safety checks.",
         )
+        self.list_capabilities_discovery_policy = self._load_prompt_with_default(
+            prompt_manager,
+            "guides.list_capabilities_discovery_policy",
+            "",
+        )
 
     @staticmethod
     def _load_prompt_with_default(prompt_manager: PromptManager, key: str, default: str) -> str:
@@ -99,7 +104,10 @@ class CrprMCPServer:
                 return self._format_runtime_helper_list_markdown(helpers=helpers)
 
             hits = await asyncio.to_thread(self.capability_catalog.list_capabilities)
-            return self._format_capability_list_markdown(hits=hits)
+            return self._format_capability_list_markdown(
+                hits=hits,
+                discovery_policy_markdown=self.list_capabilities_discovery_policy,
+            )
         except Exception as exc:
             logger.error("list_capabilities failed: %s", exc)
             return f"## Capability List\n\nError: `{exc}`"
@@ -236,21 +244,15 @@ class CrprMCPServer:
         )
 
     @staticmethod
-    def _format_capability_list_markdown(hits: list[CapabilityHit]) -> str:
+    def _format_capability_list_markdown(
+        hits: list[CapabilityHit],
+        discovery_policy_markdown: str = "",
+    ) -> str:
         lines = ["## Capability List", "", f"- Total: `{len(hits)}`", ""]
         lines.extend(CrprMCPServer._capability_kind_legend())
-        lines.extend(
-            [
-                "",
-                "### Discovery Policy",
-                "- Always call `read_capability` before using any capability from this list.",
-                "- `list_capabilities` is intentionally brief and omits arg schemas/examples/constraints.",
-                "- Do not execute capabilities from list output alone; use `read_capability` first.",
-                "- For source PR files (including changed files), use `pr_file_context_reader`.",
-                "- `file_context_reader` is cross-repo only; source-repo reads are rejected.",
-                "",
-            ]
-        )
+        policy_lines = CrprMCPServer._markdown_block_lines(discovery_policy_markdown)
+        if policy_lines:
+            lines.extend(["", *policy_lines, ""])
         if not hits:
             lines.append("No capabilities available.")
             return "\n".join(lines)
@@ -278,6 +280,13 @@ class CrprMCPServer:
                 ]
             )
         return "\n".join(lines).rstrip()
+
+    @staticmethod
+    def _markdown_block_lines(markdown: str) -> list[str]:
+        normalized = str(markdown).strip()
+        if not normalized:
+            return []
+        return [line.rstrip() for line in normalized.splitlines()]
 
     @staticmethod
     def _format_runtime_helper_list_markdown(
@@ -357,18 +366,39 @@ class CrprMCPServer:
         if capability.description:
             lines.extend(["### Description", capability.description, ""])
 
+        if capability.kind == "workflow":
+            lines.extend(
+                [
+                    "### Arg Usage",
+                    f"`{CrprMCPServer._workflow_arg_usage(capability.id, capability.arg_schema)}`",
+                    "",
+                ]
+            )
+
         lines.extend(
             [
-                "### Arg Schema",
-                "```json",
-                json.dumps(capability.arg_schema, indent=2, sort_keys=True, ensure_ascii=True),
-                "```",
-                "",
+                "### Arguments",
+            ]
+        )
+        argument_rows = CrprMCPServer._capability_argument_table_lines(capability)
+        if argument_rows:
+            lines.extend(argument_rows)
+        else:
+            lines.append("- (none)")
+
+        lines.extend(
+            [
                 "### Examples",
-                "```json",
-                json.dumps(capability.examples, indent=2, ensure_ascii=True),
-                "```",
-                "",
+            ]
+        )
+        cli_examples = CrprMCPServer._capability_cli_examples(capability)
+        if cli_examples:
+            lines.extend(cli_examples)
+        else:
+            lines.append("- (none)")
+
+        lines.extend(
+            [
                 "### Constraints",
             ]
         )
@@ -380,12 +410,14 @@ class CrprMCPServer:
         lines.extend(
             [
                 "",
-                "### Expected Output Shape",
-                "```json",
-                json.dumps(capability.expected_output_shape, indent=2, sort_keys=True, ensure_ascii=True),
-                "```",
+                "### Expected Output Summary",
             ]
         )
+        output_summary_lines = CrprMCPServer._expected_output_summary_lines(capability.expected_output_shape)
+        if output_summary_lines:
+            lines.extend(output_summary_lines)
+        else:
+            lines.extend(["Returns a JSON object.", "- (no documented fields)"])
 
         if runtime_helpers is not None:
             lines.extend(["", "### Runtime Helpers"])
@@ -404,6 +436,139 @@ class CrprMCPServer:
             )
             lines.extend(["", *runtime_helper_markdown.splitlines()])
         return "\n".join(lines)
+
+    @staticmethod
+    def _workflow_arg_usage(workflow_id: str, arg_schema: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for arg_name, schema in arg_schema.items():
+            if not isinstance(arg_name, str):
+                continue
+            schema_dict = schema if isinstance(schema, dict) else {}
+            flag = f"--{arg_name.replace('_', '-')}"
+            value_type = str(schema_dict.get("type", "value")).strip().lower() or "value"
+            value_fragment = f"<{value_type}>"
+            if schema_dict.get("required"):
+                parts.append(f"{flag} {value_fragment}")
+            else:
+                parts.append(f"[{flag} {value_fragment}]")
+        suffix = f" {' '.join(parts)}" if parts else ""
+        return f"{workflow_id}{suffix}"
+
+    @staticmethod
+    def _capability_argument_table_lines(capability: CapabilityDoc) -> list[str]:
+        if not capability.arg_schema:
+            return []
+
+        lines = [
+            "| Name | Type | Required | Default | Description |",
+            "| :--- | :--- | :--- | :--- | :--- |",
+        ]
+
+        for arg_name, schema in capability.arg_schema.items():
+            if not isinstance(arg_name, str):
+                continue
+            schema_dict = schema if isinstance(schema, dict) else {}
+            arg_type = str(schema_dict.get("type", "any")).strip() or "any"
+            required = "Yes" if schema_dict.get("required") else "No"
+            default = "N/A"
+            if "default" in schema_dict:
+                default = f"`{CrprMCPServer._python_literal(schema_dict.get('default'))}`"
+            description = str(schema_dict.get("description", "")).strip() or "N/A"
+            display_name = arg_name
+            if capability.kind == "workflow":
+                display_name = f"--{arg_name.replace('_', '-')}"
+
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        f"`{CrprMCPServer._markdown_cell(display_name)}`",
+                        f"`{CrprMCPServer._markdown_cell(arg_type)}`",
+                        required,
+                        default,
+                        CrprMCPServer._markdown_cell(description),
+                    ]
+                )
+                + " |"
+            )
+        return lines
+
+    @staticmethod
+    def _capability_cli_examples(capability: CapabilityDoc) -> list[str]:
+        lines: list[str] = []
+        for index, example in enumerate(capability.examples, start=1):
+            if not isinstance(example, dict):
+                continue
+            command = CrprMCPServer._example_to_cli_command(example)
+            if not command:
+                continue
+            lines.append(f"{index}. `{command}`")
+        return lines
+
+    @staticmethod
+    def _example_to_cli_command(example: dict[str, Any]) -> str:
+        call_name = example.get("call")
+        if not isinstance(call_name, str) or not call_name.strip():
+            return ""
+
+        args = example.get("args")
+        if not isinstance(args, dict) or not args:
+            return call_name.strip()
+
+        parts = [call_name.strip()]
+        for key, value in args.items():
+            flag = f"--{str(key).replace('_', '-')}"
+            parts.append(f"{flag} {CrprMCPServer._cli_value(value)}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _cli_value(value: Any) -> str:
+        if isinstance(value, str):
+            escaped = value.replace('"', '\\"')
+            return f'"{escaped}"'
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    @staticmethod
+    def _expected_output_summary_lines(expected_output_shape: dict[str, Any]) -> list[str]:
+        if not expected_output_shape:
+            return []
+
+        lines = ["Returns a JSON object with:"]
+        for field_name, field_shape in expected_output_shape.items():
+            if not isinstance(field_name, str):
+                continue
+            type_label = CrprMCPServer._shape_type_label(field_shape)
+            lines.append(f"- `{field_name}`: {CrprMCPServer._output_field_summary(field_name, type_label)}")
+        return lines
+
+    @staticmethod
+    def _shape_type_label(shape: Any) -> str:
+        if isinstance(shape, str):
+            return shape
+        if isinstance(shape, dict):
+            return "object"
+        if isinstance(shape, list):
+            return "list"
+        return "any"
+
+    @staticmethod
+    def _output_field_summary(field_name: str, type_label: str) -> str:
+        lower_name = field_name.strip().lower()
+        if lower_name == "summary":
+            return "High-level summary details."
+        if lower_name == "files":
+            return "List of file entries touched by the workflow."
+        if lower_name in {"owner", "repo", "pr_number", "pr-number"}:
+            return f"Echoed input identifier (type `{type_label}`)."
+        if lower_name in {"success", "exit_code", "result_json", "safety_rejections"}:
+            return f"Execution result field (type `{type_label}`)."
+        return f"Field with type `{type_label}`."
+
+    @staticmethod
+    def _markdown_cell(text: str) -> str:
+        return text.replace("|", "\\|")
 
     @staticmethod
     def _runtime_helper_signature(helper: RuntimeHelperDoc) -> str:

@@ -341,6 +341,13 @@ async def main():
             "confirmed_conflicts": confirmed_conflicts,
             "no_confirmed_conflicts": no_confirmed_conflicts,
             "no_confirmed_conflicts_reason": no_confirmed_conflicts_reason,
+            "coverage_complete": False,
+            "coverage_reason": "candidate_generation_only_requires_followup_validation",
+            "required_followup_angles": [
+                "source_contract_read",
+                "endpoint_method_route_validation",
+                "downstream_payload_mapping_validation",
+            ],
             "validation_summary": {
                 "source_pr_has_contract_artifacts": source_pr_has_contract_artifacts,
                 "overlap_candidate_count": len(overlap_candidates),

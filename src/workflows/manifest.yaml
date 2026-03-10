@@ -64,25 +64,46 @@ workflows:
       total_hits: integer
 
   - id: symbol_usage
-    summary: Locate usages/call-sites of a symbol or API.
+    summary: Locate call-sites with Zoekt-native structured filters or raw query override.
     when_to_use: Use after definitions are known and before reading file ranges directly.
-    required_args:
-      - query
-    example: "run_workflow_cli(command=\"symbol_usage --query 'ProcessOrder r:checkout'\")"
+    required_args: []
+    example: "run_workflow_cli(command=\"symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript\")"
     description: |
-      Runs regular content search to surface symbol usage and call sites.
-      Returns contextual snippets to help understand invocation patterns.
+      Runs Zoekt usage search in one of two modes:
+      - structured mode: build query from `term` and optional Zoekt filters.
+      - raw mode: pass `raw_query` directly.
+      Exactly one of `term` or `raw_query` is required.
     script_path: workflows/scripts/symbol_usage.py
     arg_schema:
-      query:
+      term:
         type: string
-        required: true
-        description: Content query for usage/call-site discovery.
+        required: false
+        description: Usage term for structured mode query composition.
+      raw_query:
+        type: string
+        required: false
+        description: Raw Zoekt query for direct execution (bypasses structured mode).
+      repo:
+        type: string
+        required: false
+        description: Repository filter mapped to `r:<repo>`.
+      lang:
+        type: string
+        required: false
+        description: Language filter mapped to `lang:<lang>`.
+      path:
+        type: string
+        required: false
+        description: Path include filter mapped to `f:<path>`.
+      exclude_path:
+        type: string
+        required: false
+        description: Path exclude filter mapped to `-f:<path>`.
       limit:
         type: integer
         required: false
         default: 10
-        description: Maximum number of hit groups.
+        description: Maximum number of deduplicated result groups returned.
       context_lines:
         type: integer
         required: false
@@ -90,16 +111,33 @@ workflows:
         minimum: 0
         maximum: 2
         description: Context lines around each match.
+      expand_variants:
+        type: boolean
+        required: false
+        default: false
+        description: Expand term into deterministic casing/plural variants (structured mode only).
     examples:
       - call: run_workflow_cli
         args:
-          command: symbol_usage --query 'ProcessOrder -f:test lang:go' --limit 8 --context-lines 2
+          command: symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 2
+      - call: run_workflow_cli
+        args:
+          command: symbol_usage --term add_to_pantry --repo github.com/acme/ui --expand-variants true --limit 8
+      - call: run_workflow_cli
+        args:
+          command: symbol_usage --raw-query 'r:github.com/acme/ui addToPantry lang:javascript -f:test' --limit 8 --context-lines 1
     constraints:
+      - Exactly one of `term` or `raw_query` is required.
+      - Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).
       - For definitions use `symbol_definition` instead.
       - Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
       - "`context_lines` is hard-limited to 2."
     expected_output_shape:
-      query: string
+      mode: string
+      input: object
+      attempted_queries: list[object]
+      total_queries: integer
+      total_raw_hits: integer
       results: list[object]
       total_hits: integer
 
@@ -266,6 +304,10 @@ workflows:
       - call: run_workflow_cli
         args:
           command: pr_context_summary --owner acme --repo checkout --pr-number 123
+      - call: run_workflow_cli
+        args:
+          command: pr_context_summary --owner acme --repo checkout --pr-number 123
+          timeout_seconds: 60
     constraints:
       - Requires GitHub API access (`GITHUB_TOKEN`).
       - Returns compact file metadata, not full patches.
@@ -374,6 +416,7 @@ workflows:
       - Defaults to all indexed repositories.
       - Canonical source repo is excluded by default unless `include_source_repo=true`.
       - Heuristic candidate detector; overlap hits are not confirmed contract conflicts.
+      - Candidate-generation step only; never use as final no-conflict clearance.
       - Always follow up with targeted workflows before reporting concrete cross-repo risk.
     expected_output_shape:
       owner: string
@@ -388,6 +431,9 @@ workflows:
       confirmed_conflicts: list[object]
       no_confirmed_conflicts: boolean
       no_confirmed_conflicts_reason: string
+      coverage_complete: boolean
+      coverage_reason: string
+      required_followup_angles: list[string]
       validation_summary: object
       errors: list[object]
 

@@ -74,3 +74,25 @@ def test_list_capabilities_runtime_helpers_view(monkeypatch) -> None:
     assert "runtime.search" in markdown
     assert "execution.run_workflow_cli" not in markdown
     assert "read_capability(capability_id=\"execution.run_custom_workflow_code\")" in markdown
+
+
+def test_read_capability_symbol_usage_zoekt_first_contract(monkeypatch) -> None:
+    monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
+    server = CrprMCPServer(ServerConfig())
+
+    markdown = asyncio.run(server.read_capability("symbol_usage"))
+
+    assert "### Arg Usage" in markdown
+    assert "--term <string>" in markdown
+    assert "--raw-query <string>" in markdown
+    assert "| `--term` | `string` | No | N/A | Usage term for structured mode query composition. |" in markdown
+    assert (
+        "| `--raw-query` | `string` | No | N/A | "
+        "Raw Zoekt query for direct execution (bypasses structured mode). |" in markdown
+    )
+    assert "Exactly one of `term` or `raw_query` is required." in markdown
+    assert (
+        '1. `run_workflow_cli --command "symbol_usage --term addToPantry --repo github.com/acme/ui '
+        '--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 2"`' in markdown
+    )
+    assert "- `attempted_queries`: Field with type `list[object]`." in markdown

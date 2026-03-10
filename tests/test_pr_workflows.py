@@ -138,6 +138,9 @@ def test_pr_cross_repo_overlap_candidates_excludes_source_repo_by_default(monkey
     assert payload["excluded_source_repos"] == ["github.com/acme/checkout"]
     assert payload["no_confirmed_conflicts"] is True
     assert payload["no_confirmed_conflicts_reason"] == "no_overlap_candidates"
+    assert payload["coverage_complete"] is False
+    assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
+    assert "endpoint_method_route_validation" in payload["required_followup_angles"]
     assert all("r:github.com/acme/inventory" in query for query in query_log)
 
 
@@ -175,6 +178,9 @@ def test_pr_cross_repo_overlap_candidates_include_source_repo_override(monkeypat
     assert payload["excluded_source_repos"] == []
     assert payload["no_confirmed_conflicts"] is True
     assert payload["no_confirmed_conflicts_reason"] == "no_overlap_candidates"
+    assert payload["coverage_complete"] is False
+    assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
+    assert "endpoint_method_route_validation" in payload["required_followup_angles"]
     assert any("r:github.com/acme/checkout" in query for query in query_log)
     assert any("r:github.com/acme/inventory" in query for query in query_log)
 
@@ -207,6 +213,9 @@ def test_pr_cross_repo_overlap_candidates_filters_generic_terms(monkeypatch, cap
     assert "usebackgroundstate" in search_terms
     assert payload["no_confirmed_conflicts"] is True
     assert payload["no_confirmed_conflicts_reason"] == "no_overlap_candidates"
+    assert payload["coverage_complete"] is False
+    assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
+    assert "endpoint_method_route_validation" in payload["required_followup_angles"]
 
 
 def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence(monkeypatch, capsys) -> None:
@@ -238,5 +247,8 @@ def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence(monkeypatch
     assert exit_code == 0
     assert payload["overlap_candidates"]
     assert payload["confirmed_conflicts"]
+    assert payload["coverage_complete"] is False
+    assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
+    assert "endpoint_method_route_validation" in payload["required_followup_angles"]
     assert payload["no_confirmed_conflicts"] is False
     assert payload["validation_summary"]["confirmed_conflict_count"] == 1

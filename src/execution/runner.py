@@ -142,7 +142,7 @@ class ExecutionRunner:
                     pass
                 hint = (
                     " Hint: over-escaped quotes (`\\\"`) can break CLI parsing. "
-                    "Use plain quotes, for example: --query 'ProcessOrder r:checkout'."
+                    "Use plain quotes, for example: --raw-query 'addToPantry r:checkout'."
                 )
                 raise ValueError(f"args validation failure: invalid command: {exc}.{hint}") from exc
             raise ValueError(f"args validation failure: invalid command: {exc}") from exc
@@ -176,7 +176,7 @@ class ExecutionRunner:
             return None
         return (
             "Hint: value appears split by over-escaped quotes (`\\\"`). "
-            "Use plain quotes, for example: --query 'ProcessOrder r:checkout'."
+            "Use plain quotes, for example: --raw-query 'addToPantry r:checkout'."
         )
 
     async def run_workflow_cli_command(self, command: str, timeout_seconds: int) -> tuple[str, ExecutionResult]:

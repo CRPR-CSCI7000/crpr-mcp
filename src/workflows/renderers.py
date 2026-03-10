@@ -44,7 +44,7 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
     workflow_renderers: dict[str, Callable[[Any], list[str]]] = {
         "repo_discovery": _render_repo_discovery_result,
         "symbol_definition": _render_symbol_search_result,
-        "symbol_usage": _render_symbol_search_result,
+        "symbol_usage": _render_symbol_usage_result,
         "file_context_reader": _render_file_context_result,
         "pr_file_context_reader": _render_pr_file_context_result,
         "pr_context_summary": _render_pr_context_summary_result,
@@ -113,6 +113,43 @@ def _render_symbol_search_result(payload: Any) -> list[str]:
         lines.extend(_render_search_results(results))
     else:
         lines.append("No matches found.")
+    return lines
+
+
+def _render_symbol_usage_result(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return _render_generic_workflow_result(payload)
+
+    mode = str(payload.get("mode", "")).strip() or "unknown"
+    attempted_queries = payload.get("attempted_queries") if isinstance(payload.get("attempted_queries"), list) else []
+    total_queries = _coerce_int(payload.get("total_queries"), default=len(attempted_queries))
+    total_raw_hits = _coerce_int(payload.get("total_raw_hits"), default=0)
+    total_hits = _coerce_int(payload.get("total_hits"), default=0)
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+
+    lines = [
+        f"Found `{total_hits}` deduplicated matches from `{total_queries}` Zoekt queries.",
+        f"- Mode: `{mode}`",
+        f"- Raw hits before dedup: `{total_raw_hits}`",
+    ]
+
+    if attempted_queries:
+        lines.extend(["", "### Attempted Queries"])
+        for index, entry in enumerate(attempted_queries[:12], start=1):
+            if not isinstance(entry, dict):
+                lines.append(f"{index}. `{_stringify_scalar(entry)}`")
+                continue
+            query = str(entry.get("query", "")).strip()
+            label = str(entry.get("variant_label", "")).strip() or "query"
+            hits = _coerce_int(entry.get("hits"), default=0)
+            lines.append(f"{index}. `{label}` | `{hits}` hits | `{query}`")
+        if len(attempted_queries) > 12:
+            lines.append(f"... and `{len(attempted_queries) - 12}` more queries.")
+
+    if results:
+        lines.extend(["", "### Top Matches", *_render_search_results(results)])
+    else:
+        lines.extend(["", "No matches found."])
     return lines
 
 
@@ -278,6 +315,11 @@ def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
     )
     no_confirmed_conflicts = bool(payload.get("no_confirmed_conflicts", False))
     no_confirmed_conflicts_reason = str(payload.get("no_confirmed_conflicts_reason", "")).strip()
+    coverage_complete = bool(payload.get("coverage_complete", False))
+    coverage_reason = str(payload.get("coverage_reason", "")).strip()
+    required_followup_angles = (
+        payload.get("required_followup_angles") if isinstance(payload.get("required_followup_angles"), list) else []
+    )
     excluded_source_repos = (
         payload.get("excluded_source_repos") if isinstance(payload.get("excluded_source_repos"), list) else []
     )
@@ -287,11 +329,21 @@ def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
         f"- Repositories inspected: `{inspected_repo_count}`",
         f"- Overlap candidates (unvalidated): `{len(overlap_candidates)}`",
         f"- Confirmed conflicts: `{len(confirmed_conflicts)}`",
+        "- Candidate-only workflow: follow-up validation is required before a final no-conflict claim.",
     ]
     if no_confirmed_conflicts:
-        lines.append(f"- No confirmed conflicts: `true` ({no_confirmed_conflicts_reason or 'no_reason_provided'})")
+        lines.append(
+            f"- No confirmed conflicts in this pass: `true` ({no_confirmed_conflicts_reason or 'no_reason_provided'})"
+        )
     else:
-        lines.append("- No confirmed conflicts: `false`")
+        lines.append("- No confirmed conflicts in this pass: `false`")
+    if coverage_complete:
+        lines.append("- Coverage complete: `true`")
+    else:
+        lines.append(f"- Coverage complete: `false` ({coverage_reason or 'followup_required'})")
+    if required_followup_angles:
+        lines.append("- Required follow-up angles:")
+        lines.extend([f"  - `{angle}`" for angle in required_followup_angles[:8]])
     if excluded_source_repos:
         lines.append("- Source repos excluded by default:")
         lines.extend([f"  - `{source_repo}`" for source_repo in excluded_source_repos[:5]])
