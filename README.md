@@ -10,6 +10,7 @@ Single service/process with embedded modules:
 - `execution/`: request/result models, AST safety checks, and isolated runner
 - `workflows/`: workflow manifest and prebuilt scripts
 - `runtime/zoekt_tools.py`: safe Python wrappers over Zoekt HTTP endpoints
+- `runtime/github_tools.py`: safe Python wrappers over GitHub PR/content endpoints
 
 There is no separate executor service.
 
@@ -78,6 +79,13 @@ Required:
 
 - `ZOEKT_API_URL`
 
+Required for GitHub-backed PR workflows:
+
+- `GITHUB_TOKEN`
+  - Used by workflows such as `pr_context_summary`, `pr_change_surface`,
+    `pr_cross_repo_overlap_candidates`, and `pr_file_context_reader`.
+  - Token should have access to the repositories being analyzed.
+
 Optional:
 
 - `MCP_SSE_PORT` (default `8000`)
@@ -88,6 +96,13 @@ Optional:
 - `EXECUTION_STDERR_MAX_BYTES` (default `32768`)
 
 ## Local Dev
+
+Create local env file and set token if you use PR workflows:
+
+```bash
+cp src/.env.sample src/.env
+# edit src/.env and set GITHUB_TOKEN
+```
 
 ```bash
 uv sync
