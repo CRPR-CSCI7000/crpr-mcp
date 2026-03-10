@@ -59,14 +59,11 @@ class ExecutionRunner:
         return workflow_index
 
     def parse_workflow_cli_command(self, command: str) -> tuple[str, dict[str, Any]]:
-        command = command.strip()
-        if not command:
+        original_command = command.strip()
+        if not original_command:
             raise ValueError("args validation failure: command must not be empty")
 
-        try:
-            tokens = shlex.split(command, posix=True)
-        except ValueError as exc:
-            raise ValueError(f"args validation failure: invalid command: {exc}") from exc
+        tokens = self._parse_cli_tokens(original_command)
 
         if not tokens:
             raise ValueError("args validation failure: command must not be empty")
@@ -91,6 +88,9 @@ class ExecutionRunner:
         while index < len(tokens):
             token = tokens[index]
             if not token.startswith("--"):
+                hint = self._escaped_quotes_hint(tokens=tokens, command=original_command)
+                if hint:
+                    raise ValueError(f"args validation failure: unexpected positional argument `{token}`. {usage} {hint}")
                 raise ValueError(f"args validation failure: unexpected positional argument `{token}`. {usage}")
 
             arg_name = flag_aliases.get(token)
@@ -128,6 +128,56 @@ class ExecutionRunner:
             raise ValueError(f"args validation failure: missing required flags: {missing_flags}. {usage}")
 
         return workflow_id, parsed_args
+
+    @staticmethod
+    def _parse_cli_tokens(command: str) -> list[str]:
+        try:
+            tokens = shlex.split(command, posix=True)
+        except ValueError as exc:
+            normalized = ExecutionRunner._normalize_over_escaped_quotes(command)
+            if normalized != command:
+                try:
+                    return shlex.split(normalized, posix=True)
+                except ValueError:
+                    pass
+                hint = (
+                    " Hint: over-escaped quotes (`\\\"`) can break CLI parsing. "
+                    "Use plain quotes, for example: --query 'ProcessOrder r:checkout'."
+                )
+                raise ValueError(f"args validation failure: invalid command: {exc}.{hint}") from exc
+            raise ValueError(f"args validation failure: invalid command: {exc}") from exc
+
+        if ExecutionRunner._looks_like_over_escaped_quote_issue(tokens=tokens, command=command):
+            normalized = ExecutionRunner._normalize_over_escaped_quotes(command)
+            if normalized != command:
+                try:
+                    return shlex.split(normalized, posix=True)
+                except ValueError:
+                    pass
+
+        return tokens
+
+    @staticmethod
+    def _normalize_over_escaped_quotes(command: str) -> str:
+        return command.replace('\\"', '"')
+
+    @staticmethod
+    def _looks_like_over_escaped_quote_issue(tokens: list[str], command: str) -> bool:
+        if '\\"' not in command:
+            return False
+        return any(
+            not token.startswith("--") and (token.startswith('"') or token.endswith('"'))
+            for token in tokens[1:]
+        )
+
+    @staticmethod
+    def _escaped_quotes_hint(tokens: list[str], command: str) -> str | None:
+        if not ExecutionRunner._looks_like_over_escaped_quote_issue(tokens=tokens, command=command):
+            return None
+        return (
+            "Hint: value appears split by over-escaped quotes (`\\\"`). "
+            "Use plain quotes, for example: --query 'ProcessOrder r:checkout'."
+        )
 
     async def run_workflow_cli_command(self, command: str, timeout_seconds: int) -> tuple[str, ExecutionResult]:
         workflow_id, args = self.parse_workflow_cli_command(command)

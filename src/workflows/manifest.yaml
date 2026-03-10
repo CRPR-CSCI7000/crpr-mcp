@@ -4,7 +4,7 @@ workflows:
     when_to_use: Start here when you do not know which repos likely contain the target code.
     required_args:
       - query
-    example: 'run_workflow_cli(command="repo_discovery --query ''billing retry''")'
+    example: "run_workflow_cli(command=\"repo_discovery --query 'billing retry'\")"
     description: |
       Discover candidate repositories for an objective by running a repository-focused Zoekt search.
       This workflow transforms the objective into a `type:repo` query and returns ranked repository names.
@@ -22,7 +22,7 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: repo_discovery --query "auth token refresh" --limit 12
+          command: repo_discovery --query 'auth token refresh' --limit 12
     constraints:
       - Keep `limit` small (5-15) for focused discovery.
       - Uses Zoekt repository search mode (`type:repo`).
@@ -36,7 +36,7 @@ workflows:
     when_to_use: Use when you need where a class/function/type is defined.
     required_args:
       - query
-    example: 'run_workflow_cli(command="symbol_definition --query ''SendMessage lang:go''")'
+    example: "run_workflow_cli(command=\"symbol_definition --query 'SendMessage lang:go'\")"
     description: |
       Uses symbol-focused search to locate likely definition sites for a named symbol.
       Supports passing additional Zoekt filters inside `query` (for example repo/lang filters).
@@ -54,7 +54,7 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: symbol_definition --query "PaymentService lang:python"
+          command: symbol_definition --query 'PaymentService lang:python'
     constraints:
       - Focused on definitions, not general usages.
       - Prefer adding `lang:` and `r:` filters for precision.
@@ -68,7 +68,7 @@ workflows:
     when_to_use: Use after definitions are known and before reading file ranges directly.
     required_args:
       - query
-    example: 'run_workflow_cli(command="symbol_usage --query ''ProcessOrder r:checkout''")'
+    example: "run_workflow_cli(command=\"symbol_usage --query 'ProcessOrder r:checkout'\")"
     description: |
       Runs regular content search to surface symbol usage and call sites.
       Returns contextual snippets to help understand invocation patterns.
@@ -93,7 +93,7 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: symbol_usage --query "ProcessOrder -f:test lang:go" --limit 8 --context-lines 2
+          command: symbol_usage --query 'ProcessOrder -f:test lang:go' --limit 8 --context-lines 2
     constraints:
       - For definitions use `symbol_definition` instead.
       - Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
@@ -627,7 +627,7 @@ execution_patterns:
     when_to_use: Use when a prebuilt workflow already fits the objective.
     required_args:
       - command
-    example: 'run_workflow_cli(command="repo_discovery --query ''auth''")'
+    example: "run_workflow_cli(command=\"repo_discovery --query 'auth'\")"
     description: Execute a prebuilt workflow script via CLI-style command flags and timeout controls.
     arg_schema:
       command:
@@ -639,7 +639,7 @@ execution_patterns:
     examples:
       - call: run_workflow_cli
         args:
-          command: symbol_definition --query "ProcessOrder lang:go"
+          command: symbol_definition --query 'ProcessOrder lang:go'
           timeout_seconds: 30
     constraints:
       - Prefer this before generating custom workflow code.

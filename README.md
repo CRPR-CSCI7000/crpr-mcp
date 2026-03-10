@@ -45,7 +45,7 @@ Removed tools:
 `run_workflow_cli` command format:
 
 - `<workflow_id> [--flag value]...`
-- Example: `symbol_usage --query "ProcessOrder lang:go" --limit 8 --context-lines 1`
+- Example: `symbol_usage --query 'ProcessOrder lang:go' --limit 8 --context-lines 1`
 
 ## Custom Workflow Code Constraints
 

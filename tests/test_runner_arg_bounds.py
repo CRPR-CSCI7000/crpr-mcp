@@ -62,6 +62,25 @@ def test_parse_workflow_cli_applies_default_and_keeps_it_bounded(tmp_path: Path)
     assert args["context_lines"] == 2
 
 
+def test_parse_workflow_cli_normalizes_over_escaped_double_quotes(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command(
+        'symbol_usage --query \\"ProcessOrder r:checkout\\" --context-lines 1'
+    )
+
+    assert workflow_id == "symbol_usage"
+    assert args["query"] == "ProcessOrder r:checkout"
+    assert args["context_lines"] == 1
+
+
+def test_parse_workflow_cli_adds_hint_for_split_value_from_over_escaped_quotes(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+
+    with pytest.raises(ValueError, match="over-escaped quotes"):
+        runner.parse_workflow_cli_command('symbol_usage --query \\"ProcessOrder r:checkout --context-lines 1')
+
+
 def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
     argv = ExecutionRunner._build_cli_argv_tokens(
         {
