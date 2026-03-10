@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-class ZoektMCPServer:
+class CrprMCPServer:
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
         self.server = FastMCP()
@@ -238,7 +238,7 @@ class ZoektMCPServer:
     @staticmethod
     def _format_capability_list_markdown(hits: list[CapabilityHit]) -> str:
         lines = ["## Capability List", "", f"- Total: `{len(hits)}`", ""]
-        lines.extend(ZoektMCPServer._capability_kind_legend())
+        lines.extend(CrprMCPServer._capability_kind_legend())
         lines.extend(
             [
                 "",
@@ -307,9 +307,9 @@ class ZoektMCPServer:
                 )
                 continue
 
-            signature = ZoektMCPServer._runtime_helper_signature(helper)
-            parameters = ZoektMCPServer._runtime_helper_parameter_lines(helper)
-            examples = ZoektMCPServer._runtime_helper_example_calls(helper)
+            signature = CrprMCPServer._runtime_helper_signature(helper)
+            parameters = CrprMCPServer._runtime_helper_parameter_lines(helper)
+            examples = CrprMCPServer._runtime_helper_example_calls(helper)
             lines.extend(
                 [
                     f"#### `{helper.id}`",
@@ -340,7 +340,7 @@ class ZoektMCPServer:
         allowed_runtime_modules: list[str] | None = None,
     ) -> str:
         lines = [f"## Capability: `{capability.id}`", "", f"- Kind: `{capability.kind}`", ""]
-        lines.extend(ZoektMCPServer._capability_kind_legend())
+        lines.extend(CrprMCPServer._capability_kind_legend())
         lines.append("")
         if capability.description:
             lines.extend(["### Description", capability.description, ""])
@@ -383,7 +383,7 @@ class ZoektMCPServer:
                 lines.extend([f"- `{module}`" for module in modules])
             else:
                 lines.append("- (none)")
-            runtime_helper_markdown = ZoektMCPServer._format_runtime_helper_list_markdown(
+            runtime_helper_markdown = CrprMCPServer._format_runtime_helper_list_markdown(
                 runtime_helpers,
                 include_header=False,
                 include_policy=False,
@@ -406,12 +406,12 @@ class ZoektMCPServer:
         params: list[str] = []
         for arg_name, arg_schema in helper.arg_schema.items():
             schema = arg_schema if isinstance(arg_schema, dict) else {}
-            arg_type = ZoektMCPServer._schema_type_to_python(schema.get("type"))
+            arg_type = CrprMCPServer._schema_type_to_python(schema.get("type"))
             if schema.get("required"):
                 params.append(f"{arg_name}: {arg_type}")
                 continue
             if "default" in schema:
-                params.append(f"{arg_name}: {arg_type} = {ZoektMCPServer._python_literal(schema.get('default'))}")
+                params.append(f"{arg_name}: {arg_type} = {CrprMCPServer._python_literal(schema.get('default'))}")
                 continue
             params.append(f"{arg_name}: {arg_type} | None = None")
 
@@ -422,14 +422,14 @@ class ZoektMCPServer:
         lines: list[str] = []
         for arg_name, arg_schema in helper.arg_schema.items():
             schema = arg_schema if isinstance(arg_schema, dict) else {}
-            arg_type = ZoektMCPServer._schema_type_to_python(schema.get("type"))
+            arg_type = CrprMCPServer._schema_type_to_python(schema.get("type"))
             required_text = "required" if schema.get("required") else "optional"
             description = str(schema.get("description", "")).strip()
             default = schema.get("default")
 
             detail_parts = [f"`{arg_name}` (`{arg_type}`, {required_text})"]
             if "default" in schema:
-                detail_parts.append(f"default `{ZoektMCPServer._python_literal(default)}`")
+                detail_parts.append(f"default `{CrprMCPServer._python_literal(default)}`")
             if description:
                 detail_parts.append(description)
             lines.append(f"- {'; '.join(detail_parts)}")
@@ -449,7 +449,7 @@ class ZoektMCPServer:
                 calls.append(f"{call_name.strip()}()")
                 continue
 
-            call_args = ", ".join(f"{key}={ZoektMCPServer._python_literal(value)}" for key, value in args.items())
+            call_args = ", ".join(f"{key}={CrprMCPServer._python_literal(value)}" for key, value in args.items())
             calls.append(f"{call_name.strip()}({call_args})")
         return calls
 
@@ -483,7 +483,7 @@ class ZoektMCPServer:
     @staticmethod
     def _format_execution_result_markdown(title: str, result: ExecutionResult) -> str:
         process_status = "success" if result.success else "failure"
-        output_status = ZoektMCPServer._infer_output_status(result)
+        output_status = CrprMCPServer._infer_output_status(result)
         lines = [
             f"## {title}",
             "",
@@ -538,7 +538,7 @@ class ZoektMCPServer:
     def _register_health_endpoints(self) -> None:
         @self.server.custom_route("/health", methods=["GET"])
         async def health_check(request: Request) -> Response:
-            return JSONResponse({"status": "ok", "service": "zoekt-mcp"})
+            return JSONResponse({"status": "ok", "service": "crpr-mcp"})
 
         @self.server.custom_route("/ready", methods=["GET"])
         async def readiness_check(request: Request) -> Response:
@@ -558,7 +558,7 @@ class ZoektMCPServer:
                 return JSONResponse(
                     {
                         "status": "ready",
-                        "service": "zoekt-mcp",
+                        "service": "crpr-mcp",
                         "mode": "capability-workflow-executor",
                     }
                 )
@@ -571,13 +571,13 @@ class ZoektMCPServer:
             self.server.run_http_async(
                 transport="streamable-http",
                 host="0.0.0.0",
-                path="/zoekt/mcp",
+                path="/crpr/mcp",
                 port=self.config.streamable_http_port,
             ),
             self.server.run_http_async(
                 transport="sse",
                 host="0.0.0.0",
-                path="/zoekt/sse",
+                path="/crpr/sse",
                 port=self.config.sse_port,
             ),
         ]
@@ -591,7 +591,7 @@ class ZoektMCPServer:
         self._register_health_endpoints()
 
         try:
-            logger.info("Starting Zoekt MCP server...")
+            logger.info("Starting CRPR MCP server...")
             await self._run_server()
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt (CTRL+C)")
@@ -604,7 +604,7 @@ class ZoektMCPServer:
 
 def main() -> None:
     config = ServerConfig()
-    server = ZoektMCPServer(config)
+    server = CrprMCPServer(config)
     asyncio.run(server.run())
 
 

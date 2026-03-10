@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main entry point for Zoekt MCP server."""
+"""Main entry point for CRPR MCP server."""
 
 import logging
 import sys

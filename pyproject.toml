@@ -1,5 +1,5 @@
 [project]
-name = "zoekt-mcp"
+name = "crpr-mcp"
 version = "0.1.0"
 description = "Model Context Protocol (MCP) server for Zoekt code search"
 readme = "README.md"
@@ -31,15 +31,15 @@ dev = [
 ]
 
 [project.scripts]
-zoekt-mcp = "zoekt_mcp.main:main"
+crpr-mcp = "crpr_mcp.main:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["zoekt_mcp"]
-package-dir = {"zoekt_mcp" = "src"}
+packages = ["crpr_mcp"]
+package-dir = {"crpr_mcp" = "src"}
 
 [tool.ruff]
 line-length = 120

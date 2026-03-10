@@ -1,6 +1,6 @@
-# Zoekt MCP Server
+# CRPR MCP Server
 
-`zoekt-mcp` is a Model Context Protocol (MCP) server that exposes a workflow-first interface for Zoekt-backed code intelligence.
+`crpr-mcp` is a Model Context Protocol (MCP) server that exposes a workflow-first interface for Zoekt-backed code intelligence.
 
 ## Architecture
 
