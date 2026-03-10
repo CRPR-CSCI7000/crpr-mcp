@@ -246,6 +246,8 @@ class CrprMCPServer:
                 "- Always call `read_capability` before using any capability from this list.",
                 "- `list_capabilities` is intentionally brief and omits arg schemas/examples/constraints.",
                 "- Do not execute capabilities from list output alone; use `read_capability` first.",
+                "- For source PR files (including changed files), use `pr_file_context_reader`.",
+                "- `file_context_reader` is cross-repo only; source-repo reads are rejected.",
                 "",
             ]
         )
@@ -260,6 +262,16 @@ class CrprMCPServer:
                     f"- Kind: `{hit.kind}`",
                     f"- Summary: {hit.summary}",
                     f"- When to use: {hit.when_to_use}",
+                ]
+            )
+            if hit.id == "file_context_reader":
+                lines.append(
+                    "- Scope warning: never use this for source PR repository files; use `pr_file_context_reader`."
+                )
+            elif hit.id == "pr_file_context_reader":
+                lines.append("- Scope note: use this for source PR file reads at `head`/`base` refs.")
+            lines.extend(
+                [
                     f"- Next step: `read_capability(capability_id=\"{hit.id}\")`",
                     "- Interface details intentionally omitted here; use `read_capability`.",
                     "",

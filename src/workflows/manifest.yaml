@@ -104,8 +104,8 @@ workflows:
       total_hits: integer
 
   - id: file_context_reader
-    summary: Read a bounded line window from a non-source repository file.
-    when_to_use: Use for cross-repository follow-up reads after overlap/symbol workflows identify target files.
+    summary: Read a bounded line window from a non-source repository file (never source PR files).
+    when_to_use: Use only after you identify a specific non-source repo file to inspect; never use for source PR files or changed-file validation.
     required_args:
       - source_owner
       - source_repo
@@ -165,8 +165,8 @@ workflows:
       evidence_origin: string
 
   - id: pr_file_context_reader
-    summary: Read source repository file lines pinned to PR head/base SHA.
-    when_to_use: Use for source-repo evidence in PR-scoped analysis.
+    summary: Read source PR repository file lines pinned to PR head/base SHA.
+    when_to_use: Use for source-repo evidence in PR-scoped analysis, including changed files in the source PR.
     required_args:
       - owner
       - repo
