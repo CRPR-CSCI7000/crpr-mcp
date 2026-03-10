@@ -58,3 +58,28 @@ def test_request_raises_with_error_body_for_non_retryable_failure() -> None:
     with patch("runtime.github_tools.requests.request", return_value=not_found):
         with pytest.raises(GitHubRuntimeError, match="status 404"):
             runtime.get_pull_request("acme", "checkout", 404)
+
+
+def test_get_file_content_decodes_base64_payload() -> None:
+    runtime = GitHubRuntime(token="token", base_url="https://api.github.com", max_retries=1)
+    contents_payload = {
+        "type": "file",
+        "encoding": "base64",
+        "content": "aGVsbG8gd29ybGQK",
+    }
+    contents = _response(200, contents_payload)
+
+    with patch("runtime.github_tools.requests.request", return_value=contents):
+        text = runtime.get_file_content("acme", "checkout", "src/main.py", ref="abc123")
+
+    assert text == "hello world\n"
+
+
+def test_get_file_content_rejects_directory_payload() -> None:
+    runtime = GitHubRuntime(token="token", base_url="https://api.github.com", max_retries=1)
+    directory_payload = [{"path": "src"}]
+    directory_response = _response(200, directory_payload)
+
+    with patch("runtime.github_tools.requests.request", return_value=directory_response):
+        with pytest.raises(GitHubRuntimeError, match="directory"):
+            runtime.get_file_content("acme", "checkout", "src")

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from src.capabilities import CapabilityCatalog
 from src.config import ServerConfig
-from src.server import ZoektMCPServer
+from src.server import CrprMCPServer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,7 +29,7 @@ def test_read_capability_runtime_id_is_unknown() -> None:
 
 def test_read_capability_custom_workflow_includes_runtime_helpers(monkeypatch) -> None:
     monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
-    server = ZoektMCPServer(ServerConfig())
+    server = CrprMCPServer(ServerConfig())
 
     markdown = asyncio.run(server.read_capability("execution.run_custom_workflow_code"))
 
@@ -42,7 +42,7 @@ def test_read_capability_custom_workflow_includes_runtime_helpers(monkeypatch) -
 
 def test_read_capability_runtime_doc_returns_unknown(monkeypatch) -> None:
     monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
-    server = ZoektMCPServer(ServerConfig())
+    server = CrprMCPServer(ServerConfig())
 
     markdown = asyncio.run(server.read_capability("runtime.search"))
 
@@ -51,7 +51,7 @@ def test_read_capability_runtime_doc_returns_unknown(monkeypatch) -> None:
 
 def test_list_capabilities_emphasizes_read_capability(monkeypatch) -> None:
     monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
-    server = ZoektMCPServer(ServerConfig())
+    server = CrprMCPServer(ServerConfig())
 
     markdown = asyncio.run(server.list_capabilities())
 
@@ -63,7 +63,7 @@ def test_list_capabilities_emphasizes_read_capability(monkeypatch) -> None:
 
 def test_list_capabilities_runtime_helpers_view(monkeypatch) -> None:
     monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
-    server = ZoektMCPServer(ServerConfig())
+    server = CrprMCPServer(ServerConfig())
 
     markdown = asyncio.run(server.list_capabilities(view="runtime_helpers"))
 

@@ -607,6 +607,5 @@ def main() -> None:
     server = CrprMCPServer(config)
     asyncio.run(server.run())
 
-
 if __name__ == "__main__":
     main()

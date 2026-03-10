@@ -28,8 +28,9 @@ tools:
     Execute a prebuilt workflow by CLI-style command.
 
     Prefer this path over generated scripts whenever a matching workflow exists.
-    For code understanding tasks, prefer `symbol_definition`/`symbol_usage` first,
-    then use `file_context_reader` only as a final, narrow follow-up.
+    For PR-scoped code understanding tasks, prefer `symbol_definition`/`symbol_usage` first.
+    Use `pr_file_context_reader` for source-repo reads (PR head/base SHA), and
+    use `file_context_reader` only for cross-repo Zoekt reads.
     Hard limits: search context lines must be <= 2; file windows must be <= 60 lines.
 
     Parameters:
@@ -68,9 +69,10 @@ guides:
     1. Call `list_capabilities`.
     2. Call `read_capability` on the best candidate id(s).
     3. Use `run_workflow_cli` for `symbol_definition`/`symbol_usage` to narrow scope.
-    4. Use `file_context_reader` only after exact repo/path/line targets are known.
-    5. For custom code, optionally call `list_capabilities(view="runtime_helpers")`, then read `execution.run_custom_workflow_code`.
-    6. Use `run_custom_workflow_code` only as fallback.
+    4. For source PR repo reads, use `pr_file_context_reader` pinned to PR ref (`head` by default).
+    5. For cross-repo reads, use `file_context_reader` (source-repo reads are blocked there).
+    6. For custom code, optionally call `list_capabilities(view="runtime_helpers")`, then read `execution.run_custom_workflow_code`.
+    7. Use `run_custom_workflow_code` only as fallback.
 
     Execution marker convention:
     - Runner accepts marker output `__RESULT_JSON__=<json>`, plain JSON stdout, and plain text stdout.

@@ -96,7 +96,7 @@ workflows:
           command: symbol_usage --query "ProcessOrder -f:test lang:go" --limit 8 --context-lines 2
     constraints:
       - For definitions use `symbol_definition` instead.
-      - Prefer this workflow to narrow targets before `file_context_reader`.
+      - Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
       - "`context_lines` is hard-limited to 2."
     expected_output_shape:
       query: string
@@ -104,23 +104,33 @@ workflows:
       total_hits: integer
 
   - id: file_context_reader
-    summary: Read a bounded line window from a file.
-    when_to_use: Use as a final step when a specific file/line range is known from search workflows.
+    summary: Read a bounded line window from a non-source repository file.
+    when_to_use: Use for cross-repository follow-up reads after overlap/symbol workflows identify target files.
     required_args:
+      - source_owner
+      - source_repo
       - repo
       - path
       - start_line
       - end_line
-    example: 'run_workflow_cli(command="file_context_reader --repo github.com/org/repo --path src/app.py --start-line 1 --end-line 60")'
+    example: 'run_workflow_cli(command="file_context_reader --source-owner acme --source-repo checkout --repo github.com/acme/inventory --path src/app.py --start-line 1 --end-line 60")'
     description: |
-      Reads a specific line range from a file in a repository.
-      Intended for focused code understanding after discovery phases.
+      Reads a specific line range from a file in a non-source repository via Zoekt.
+      In PR-scoped analysis this workflow is cross-repo only; source repository reads are rejected.
     script_path: workflows/scripts/file_context_reader.py
     arg_schema:
+      source_owner:
+        type: string
+        required: true
+        description: Source PR repository owner/org.
+      source_repo:
+        type: string
+        required: true
+        description: Source PR repository name.
       repo:
         type: string
         required: true
-        description: Repository identifier.
+        description: Target repository identifier (must not equal source repo).
       path:
         type: string
         required: true
@@ -138,17 +148,93 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: file_context_reader --repo github.com/org/payments --path src/service.py --start-line 40 --end-line 85
+          command: file_context_reader --source-owner acme --source-repo checkout --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85
     constraints:
+      - Source-repo reads are blocked; use `pr_file_context_reader` for source PR repository content.
       - Requires a file path, not a directory.
       - "Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines."
       - Prefer iterative narrow reads over broad file grabs.
     expected_output_shape:
+      source_owner: string
+      source_repo: string
       repo: string
       path: string
       start_line: integer
       end_line: integer
       content: string
+      evidence_origin: string
+
+  - id: pr_file_context_reader
+    summary: Read source repository file lines pinned to PR head/base SHA.
+    when_to_use: Use for source-repo evidence in PR-scoped analysis.
+    required_args:
+      - owner
+      - repo
+      - pr_number
+      - path
+      - start_line
+      - end_line
+    example: 'run_workflow_cli(command="pr_file_context_reader --owner acme --repo checkout --pr-number 123 --path src/service.py --start-line 20 --end-line 60 --ref-side head")'
+    description: |
+      Reads a specific line range from a source-repo file using GitHub content at PR `head` or `base` SHA.
+      This avoids branch/index ambiguity when evaluating source PR changes.
+    script_path: workflows/scripts/pr_file_context_reader.py
+    arg_schema:
+      owner:
+        type: string
+        required: true
+        description: Source PR repository owner or organization.
+      repo:
+        type: string
+        required: true
+        description: Source PR repository name.
+      pr_number:
+        type: integer
+        required: true
+        minimum: 1
+        description: Pull request number.
+      path:
+        type: string
+        required: true
+        description: File path inside source repository.
+      start_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: 1-indexed start line.
+      end_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: 1-indexed end line.
+      ref_side:
+        type: string
+        required: false
+        default: head
+        description: PR ref side to read from (`head` or `base`).
+    examples:
+      - call: run_workflow_cli
+        args:
+          command: pr_file_context_reader --owner acme --repo checkout --pr-number 123 --path src/service.py --start-line 20 --end-line 60 --ref-side head
+      - call: run_workflow_cli
+        args:
+          command: pr_file_context_reader --owner acme --repo checkout --pr-number 123 --path src/service.py --start-line 20 --end-line 60 --ref-side base
+    constraints:
+      - Uses GitHub PR metadata and repository contents API.
+      - Requires `GITHUB_TOKEN`.
+      - "Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines."
+    expected_output_shape:
+      owner: string
+      repo: string
+      pr_number: integer
+      path: string
+      start_line: integer
+      end_line: integer
+      content: string
+      ref_side: string
+      ref_name: string
+      ref_sha: string
+      evidence_origin: string
 
   - id: pr_context_summary
     summary: Build concise PR context from GitHub metadata and file list.
@@ -499,6 +585,41 @@ runtime_tools:
       - Handles API pagination and retry logic.
     expected_output_shape:
       files: list[object]
+
+  - id: runtime.github_get_file_content
+    summary: Fetch file content from GitHub repository at an optional ref.
+    when_to_use: Use when workflow code needs exact source content at PR head/base SHA.
+    required_args:
+      - owner
+      - repo
+      - path
+    example: 'runtime.github_tools.get_file_content(owner="acme", repo="checkout", path="src/service.py", ref="2f4d9d0")'
+    description: Retrieve UTF-8 file content from GitHub Contents API, optionally pinned to a branch/SHA ref.
+    arg_schema:
+      owner:
+        type: string
+        required: true
+      repo:
+        type: string
+        required: true
+      path:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: false
+    examples:
+      - call: runtime.github_tools.get_file_content
+        args:
+          owner: acme
+          repo: checkout
+          path: src/service.py
+          ref: 2f4d9d0
+    constraints:
+      - Requires `GITHUB_TOKEN`.
+      - Use explicit SHA refs for deterministic PR-source reads.
+    expected_output_shape:
+      content: string
 
 execution_patterns:
   - id: execution.run_workflow_cli
