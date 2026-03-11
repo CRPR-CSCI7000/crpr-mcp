@@ -93,6 +93,6 @@ def test_read_capability_symbol_usage_zoekt_first_contract(monkeypatch) -> None:
     assert "Exactly one of `term` or `raw_query` is required." in markdown
     assert (
         '1. `run_workflow_cli --command "symbol_usage --term addToPantry --repo github.com/acme/ui '
-        '--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 2"`' in markdown
+        '--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5"`' in markdown
     )
     assert "- `attempted_queries`: Field with type `list[object]`." in markdown

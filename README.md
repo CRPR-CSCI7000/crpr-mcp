@@ -82,8 +82,9 @@ Required:
 Required for GitHub-backed PR workflows:
 
 - `GITHUB_TOKEN`
-  - Used by workflows such as `pr_context_summary`, `pr_change_surface`,
-    `pr_cross_repo_overlap_candidates`, and `pr_file_context_reader`.
+  - Used by workflows such as `pr_impact_assessment`,
+    `pr_cross_repo_overlap_candidates`, `pr_file_context_reader`, and
+    `validate_contract_alignment` (provider-side reads).
   - Token should have access to the repositories being analyzed.
 
 Optional:

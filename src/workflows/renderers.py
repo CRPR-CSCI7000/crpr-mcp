@@ -47,9 +47,9 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
         "symbol_usage": _render_symbol_usage_result,
         "file_context_reader": _render_file_context_result,
         "pr_file_context_reader": _render_pr_file_context_result,
-        "pr_context_summary": _render_pr_context_summary_result,
-        "pr_change_surface": _render_pr_change_surface_result,
+        "pr_impact_assessment": _render_pr_impact_assessment_result,
         "pr_cross_repo_overlap_candidates": _render_pr_cross_repo_overlap_candidates_result,
+        "validate_contract_alignment": _render_validate_contract_alignment_result,
     }
     renderer = workflow_renderers.get(workflow_id, _render_generic_workflow_result)
     body = renderer(payload)
@@ -220,7 +220,7 @@ def _render_pr_file_context_result(payload: Any) -> list[str]:
     return lines
 
 
-def _render_pr_context_summary_result(payload: Any) -> list[str]:
+def _render_pr_impact_assessment_result(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return _render_generic_workflow_result(payload)
 
@@ -229,18 +229,20 @@ def _render_pr_context_summary_result(payload: Any) -> list[str]:
     pr_number = _coerce_int(payload.get("pr_number"), default=0)
     pr = payload.get("pr") if isinstance(payload.get("pr"), dict) else {}
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    totals = payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
+    status_counts = payload.get("status_counts") if isinstance(payload.get("status_counts"), list) else []
+    directory_counts = payload.get("directory_counts") if isinstance(payload.get("directory_counts"), list) else []
+    extension_summary = payload.get("extension_summary") if isinstance(payload.get("extension_summary"), list) else []
     files = payload.get("files") if isinstance(payload.get("files"), list) else []
-
+    largest_files = payload.get("largest_files") if isinstance(payload.get("largest_files"), list) else []
     title = str(pr.get("title", "")).strip()
-    changed_files = _coerce_int(pr.get("changed_files"), default=len(files))
-    additions = _coerce_int(pr.get("additions"), default=0)
-    deletions = _coerce_int(pr.get("deletions"), default=0)
 
     lines = [
-        f"PR `{owner}/{repo}#{pr_number}` context summary." if owner and repo else "PR context summary.",
+        f"PR `{owner}/{repo}#{pr_number}` impact assessment." if owner and repo else "PR impact assessment.",
         f"- Title: {title or '(untitled)'}",
-        f"- Changed files: `{changed_files}`",
-        f"- Additions/Deletions: `{additions}` / `{deletions}`",
+        f"- Files changed: `{_coerce_int(totals.get('files_changed'), default=len(largest_files))}`",
+        f"- Additions/Deletions: `{_coerce_int(totals.get('additions'), 0)}` / `{_coerce_int(totals.get('deletions'), 0)}`",
+        f"- Compact file entries: `{len(files)}`",
     ]
 
     top_extensions = summary.get("top_extensions") if isinstance(summary.get("top_extensions"), list) else []
@@ -249,33 +251,6 @@ def _render_pr_context_summary_result(payload: Any) -> list[str]:
         for entry in top_extensions[:8]:
             if isinstance(entry, dict):
                 lines.append(f"- `{entry.get('name', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
-
-    top_directories = summary.get("top_directories") if isinstance(summary.get("top_directories"), list) else []
-    if top_directories:
-        lines.extend(["", "### Top Directories"])
-        for entry in top_directories[:8]:
-            if isinstance(entry, dict):
-                lines.append(f"- `{entry.get('name', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
-    return lines
-
-
-def _render_pr_change_surface_result(payload: Any) -> list[str]:
-    if not isinstance(payload, dict):
-        return _render_generic_workflow_result(payload)
-
-    owner = str(payload.get("owner", "")).strip()
-    repo = str(payload.get("repo", "")).strip()
-    pr_number = _coerce_int(payload.get("pr_number"), default=0)
-    totals = payload.get("totals") if isinstance(payload.get("totals"), dict) else {}
-    status_counts = payload.get("status_counts") if isinstance(payload.get("status_counts"), list) else []
-    directory_counts = payload.get("directory_counts") if isinstance(payload.get("directory_counts"), list) else []
-    largest_files = payload.get("largest_files") if isinstance(payload.get("largest_files"), list) else []
-
-    lines = [
-        f"PR `{owner}/{repo}#{pr_number}` change surface." if owner and repo else "PR change surface.",
-        f"- Files changed: `{_coerce_int(totals.get('files_changed'), default=len(largest_files))}`",
-        f"- Additions/Deletions: `{_coerce_int(totals.get('additions'), 0)}` / `{_coerce_int(totals.get('deletions'), 0)}`",
-    ]
 
     if status_counts:
         lines.extend(["", "### Status Mix"])
@@ -288,6 +263,15 @@ def _render_pr_change_surface_result(payload: Any) -> list[str]:
         for entry in directory_counts[:10]:
             if isinstance(entry, dict):
                 lines.append(f"- `{entry.get('directory', '(unknown)')}`: `{_coerce_int(entry.get('count'), 0)}`")
+
+    if extension_summary:
+        lines.extend(["", "### Extension Surface"])
+        for entry in extension_summary[:10]:
+            if not isinstance(entry, dict):
+                continue
+            extension = str(entry.get("extension", "(unknown)"))
+            changes = _coerce_int(entry.get("changes"), 0)
+            lines.append(f"- `{extension}`: `{changes}` changes")
 
     if largest_files:
         lines.extend(["", "### Largest File Deltas"])
@@ -320,6 +304,11 @@ def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
     required_followup_angles = (
         payload.get("required_followup_angles") if isinstance(payload.get("required_followup_angles"), list) else []
     )
+    suggested_alignment_checks = (
+        payload.get("suggested_alignment_checks")
+        if isinstance(payload.get("suggested_alignment_checks"), list)
+        else []
+    )
     excluded_source_repos = (
         payload.get("excluded_source_repos") if isinstance(payload.get("excluded_source_repos"), list) else []
     )
@@ -344,6 +333,7 @@ def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
     if required_followup_angles:
         lines.append("- Required follow-up angles:")
         lines.extend([f"  - `{angle}`" for angle in required_followup_angles[:8]])
+    lines.append(f"- Suggested alignment checks: `{len(suggested_alignment_checks)}`")
     if excluded_source_repos:
         lines.append("- Source repos excluded by default:")
         lines.extend([f"  - `{source_repo}`" for source_repo in excluded_source_repos[:5]])
@@ -369,9 +359,144 @@ def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
             total_hits = _coerce_int(entry.get("total_hits"), default=0)
             term_matches = entry.get("term_matches") if isinstance(entry.get("term_matches"), list) else []
             lines.append(f"- `{conflict_repo}`: `{total_hits}` total hits (`{len(term_matches)}` matched terms)")
+        sample_hits = _collect_overlap_candidate_samples(overlap_candidates)
+        if sample_hits:
+            lines.extend(["", "### Candidate Sample Snippets", *_render_search_results(sample_hits, max_files=8)])
     else:
         lines.extend(["", "No cross-repo overlap candidates found."])
+
+    if suggested_alignment_checks:
+        lines.extend(["", "### Suggested Alignment Checks"])
+        for index, check in enumerate(suggested_alignment_checks[:8], start=1):
+            if not isinstance(check, dict):
+                continue
+            term = str(check.get("term", "")).strip() or "(unknown term)"
+            command = _alignment_check_command_from_suggestion(check)
+            lines.append(f"{index}. `{term}`")
+            lines.append(f"   `{command}`")
     return lines
+
+
+def _render_validate_contract_alignment_result(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return _render_generic_workflow_result(payload)
+
+    provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
+    consumer = payload.get("consumer") if isinstance(payload.get("consumer"), dict) else {}
+    alignment = payload.get("alignment") if isinstance(payload.get("alignment"), dict) else {}
+    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    coverage_complete = bool(payload.get("coverage_complete", False))
+    coverage_reason = str(payload.get("coverage_reason", "")).strip() or "unknown"
+
+    provider_label = f"{provider.get('owner', '')}/{provider.get('repo', '')}".strip("/")
+    provider_path = str(provider.get("path", "")).strip()
+    consumer_repo = str(consumer.get("repo", "")).strip()
+    consumer_path = str(consumer.get("path", "")).strip()
+
+    lines = [
+        "Contract alignment assessment.",
+        f"- Provider: `{provider_label}` `{provider_path}`",
+        f"- Consumer: `{consumer_repo}` `{consumer_path}`",
+        f"- Coverage complete: `{'true' if coverage_complete else 'false'}` ({coverage_reason})",
+    ]
+
+    if warnings:
+        lines.extend(["", "### Warnings"])
+        for warning in warnings[:10]:
+            lines.append(f"- {warning}")
+
+    if alignment:
+        lines.extend(["", "### Alignment Diff"])
+        for category in ("keys", "params", "http_signatures"):
+            category_alignment = alignment.get(category)
+            if not isinstance(category_alignment, dict):
+                continue
+            shared = category_alignment.get("shared") if isinstance(category_alignment.get("shared"), list) else []
+            provider_only = (
+                category_alignment.get("provider_only")
+                if isinstance(category_alignment.get("provider_only"), list)
+                else []
+            )
+            consumer_only = (
+                category_alignment.get("consumer_only")
+                if isinstance(category_alignment.get("consumer_only"), list)
+                else []
+            )
+            lines.append(
+                f"- `{category}`: shared `{len(shared)}`, provider-only `{len(provider_only)}`, consumer-only `{len(consumer_only)}`"
+            )
+
+    if findings:
+        lines.extend(["", "### Findings"])
+        for finding in findings[:12]:
+            if not isinstance(finding, dict):
+                continue
+            category = str(finding.get("category", "overall"))
+            kind = str(finding.get("kind", "unknown"))
+            count = _coerce_int(finding.get("count"), 0)
+            confidence = str(finding.get("confidence", "low"))
+            lines.append(f"- `{category}` `{kind}`: `{count}` items (`{confidence}` confidence)")
+    return lines
+
+
+def _collect_overlap_candidate_samples(overlap_candidates: list[Any]) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    for candidate in overlap_candidates[:6]:
+        if not isinstance(candidate, dict):
+            continue
+        repo = str(candidate.get("repo", "")).strip()
+        term_matches = candidate.get("term_matches")
+        if not isinstance(term_matches, list):
+            continue
+        for term_match in term_matches[:2]:
+            if not isinstance(term_match, dict):
+                continue
+            samples_list = term_match.get("samples")
+            if not isinstance(samples_list, list):
+                continue
+            for sample in samples_list[:1]:
+                if not isinstance(sample, dict):
+                    continue
+                sample_repo = str(sample.get("repository", "")).strip() or repo
+                filename = str(sample.get("filename", "")).strip()
+                matches = sample.get("matches") if isinstance(sample.get("matches"), list) else []
+                if not filename or not matches:
+                    continue
+                samples.append(
+                    {
+                        "repository": sample_repo,
+                        "filename": filename,
+                        "matches": matches,
+                        "url": sample.get("url"),
+                    }
+                )
+    return samples
+
+
+def _alignment_check_command_from_suggestion(check: dict[str, Any]) -> str:
+    command_parts = ["validate_contract_alignment"]
+    arg_order = [
+        "provider_owner",
+        "provider_repo",
+        "provider_pr_number",
+        "provider_path",
+        "provider_start_line",
+        "provider_end_line",
+        "provider_ref_side",
+        "consumer_repo",
+        "consumer_path",
+        "consumer_start_line",
+        "consumer_end_line",
+    ]
+    for arg_name in arg_order:
+        if arg_name not in check:
+            continue
+        value = check.get(arg_name)
+        if value is None:
+            continue
+        command_parts.append(f"--{arg_name.replace('_', '-')} {value}")
+    return " ".join(command_parts)
 
 
 def _render_generic_workflow_result(payload: Any) -> list[str]:
@@ -403,7 +528,7 @@ def _render_generic_workflow_result(payload: Any) -> list[str]:
     return [f"Result type: `{type(payload).__name__}`"]
 
 
-def _render_search_results(results: list[Any], max_files: int = 10, max_matches_per_file: int = 4) -> list[str]:
+def _render_search_results(results: list[Any], max_files: int = 10, max_matches_per_file: int = 3) -> list[str]:
     lines: list[str] = []
     for index, entry in enumerate(results[:max_files], start=1):
         if not isinstance(entry, dict):
@@ -416,22 +541,29 @@ def _render_search_results(results: list[Any], max_files: int = 10, max_matches_
         lines.append(f"{index}. `{location}`")
 
         matches = entry.get("matches") if isinstance(entry.get("matches"), list) else []
-        for match in matches[:max_matches_per_file]:
+        if not matches:
+            lines.append("```text")
+            lines.append("(no match snippets)")
+            lines.append("```")
+        for match_index, match in enumerate(matches[:max_matches_per_file], start=1):
             if not isinstance(match, dict):
-                lines.append(f"   - `{_stringify_scalar(match)}`")
+                lines.append("```text")
+                lines.append(_stringify_scalar(match))
+                lines.append("```")
                 continue
-            line_number = _coerce_int(match.get("line_number"), default=0)
-            text = str(match.get("text", "")).replace("\n", " ").strip()
-            if len(text) > 220:
-                text = f"{text[:217]}..."
-            lines.append(f"   - L{line_number}: `{text}`")
+            line_number = max(1, _coerce_int(match.get("line_number"), default=1))
+            text = str(match.get("text", "")).rstrip()
+            lines.append(f"Match `{match_index}` (anchor `L{line_number}`):")
+            lines.append("```text")
+            lines.append(_with_line_numbers(text, start_line=line_number) if text else "(empty snippet)")
+            lines.append("```")
 
         if len(matches) > max_matches_per_file:
-            lines.append(f"   - ... `{len(matches) - max_matches_per_file}` more matches")
+            lines.append(f"... `{len(matches) - max_matches_per_file}` additional matches omitted")
 
         url = str(entry.get("url", "")).strip()
         if url:
-            lines.append(f"   {url}")
+            lines.append(url)
 
     if len(results) > max_files:
         lines.append(f"... and `{len(results) - max_files}` more files.")

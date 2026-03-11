@@ -35,8 +35,8 @@ def _parse_result_payload(module, stdout: str) -> dict:
     raise AssertionError("result marker not found in stdout")
 
 
-def test_pr_context_summary_output_shape(monkeypatch, capsys) -> None:
-    module = _load_script_module("pr_context_summary.py")
+def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
+    module = _load_script_module("pr_impact_assessment.py")
     _set_cli_args(module, monkeypatch, {"owner": "acme", "repo": "checkout", "pr_number": 12})
 
     monkeypatch.setattr(
@@ -75,37 +75,12 @@ def test_pr_context_summary_output_shape(monkeypatch, capsys) -> None:
     assert payload["pr_number"] == 12
     assert payload["pr"]["title"] == "Harden retries"
     assert payload["summary"]["file_count"] == 2
-    assert isinstance(payload["files"], list)
-
-
-def test_pr_change_surface_output_shape(monkeypatch, capsys) -> None:
-    module = _load_script_module("pr_change_surface.py")
-    _set_cli_args(module, monkeypatch, {"owner": "acme", "repo": "checkout", "pr_number": 12})
-
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_pull_request",
-        lambda owner, repo, pr_number: {"changed_files": 2, "additions": 15, "deletions": 4},
-    )
-    monkeypatch.setattr(
-        module.github_tools,
-        "list_pull_request_files",
-        lambda owner, repo, pr_number: [
-            {"filename": "src/retry.py", "status": "modified", "additions": 10, "deletions": 2, "changes": 12},
-            {"filename": "tests/test_retry.py", "status": "added", "additions": 5, "deletions": 2, "changes": 7},
-        ],
-    )
-
-    exit_code = asyncio.run(module.main())
-    captured = capsys.readouterr()
-    payload = _parse_result_payload(module, captured.out)
-
-    assert exit_code == 0
     assert payload["totals"]["files_changed"] == 2
     assert isinstance(payload["status_counts"], list)
     assert isinstance(payload["directory_counts"], list)
     assert isinstance(payload["extension_summary"], list)
     assert isinstance(payload["largest_files"], list)
+    assert isinstance(payload["files"], list)
 
 
 def test_pr_cross_repo_overlap_candidates_excludes_source_repo_by_default(monkeypatch, capsys) -> None:
@@ -141,6 +116,7 @@ def test_pr_cross_repo_overlap_candidates_excludes_source_repo_by_default(monkey
     assert payload["coverage_complete"] is False
     assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
     assert "endpoint_method_route_validation" in payload["required_followup_angles"]
+    assert isinstance(payload["suggested_alignment_checks"], list)
     assert all("r:github.com/acme/inventory" in query for query in query_log)
 
 
@@ -181,6 +157,7 @@ def test_pr_cross_repo_overlap_candidates_include_source_repo_override(monkeypat
     assert payload["coverage_complete"] is False
     assert payload["coverage_reason"] == "candidate_generation_only_requires_followup_validation"
     assert "endpoint_method_route_validation" in payload["required_followup_angles"]
+    assert isinstance(payload["suggested_alignment_checks"], list)
     assert any("r:github.com/acme/checkout" in query for query in query_log)
     assert any("r:github.com/acme/inventory" in query for query in query_log)
 
@@ -218,7 +195,9 @@ def test_pr_cross_repo_overlap_candidates_filters_generic_terms(monkeypatch, cap
     assert "endpoint_method_route_validation" in payload["required_followup_angles"]
 
 
-def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence(monkeypatch, capsys) -> None:
+def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence_and_suggests_alignment_checks(
+    monkeypatch, capsys
+) -> None:
     module = _load_script_module("pr_cross_repo_overlap_candidates.py")
     _set_cli_args(module, monkeypatch, {"owner": "acme", "repo": "checkout", "pr_number": 12})
 
@@ -252,3 +231,10 @@ def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence(monkeypatch
     assert "endpoint_method_route_validation" in payload["required_followup_angles"]
     assert payload["no_confirmed_conflicts"] is False
     assert payload["validation_summary"]["confirmed_conflict_count"] == 1
+    assert payload["suggested_alignment_checks"]
+    first = payload["suggested_alignment_checks"][0]
+    assert first["provider_owner"] == "acme"
+    assert first["provider_repo"] == "checkout"
+    assert first["provider_pr_number"] == 12
+    assert first["provider_ref_side"] == "head"
+    assert first["consumer_repo"] == "github.com/acme/inventory"

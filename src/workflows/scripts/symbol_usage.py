@@ -6,7 +6,7 @@ import re
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
-MAX_CONTEXT_LINES = 2
+MAX_CONTEXT_LINES = 10
 
 
 def parse_args(argv=None):
@@ -18,7 +18,7 @@ def parse_args(argv=None):
     parser.add_argument("--path")
     parser.add_argument("--exclude-path")
     parser.add_argument("--limit", type=int, default=10)
-    parser.add_argument("--context-lines", type=int, default=2)
+    parser.add_argument("--context-lines", type=int, default=5)
     parser.add_argument("--expand-variants", type=_parse_bool, default=False)
     return parser.parse_args(argv)
 

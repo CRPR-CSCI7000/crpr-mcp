@@ -250,6 +250,95 @@ def _build_confirmed_conflicts(overlap_candidates: list[dict[str, object]]) -> l
     return confirmed
 
 
+def _find_provider_path_for_term(changed_filenames: list[str], term: str) -> str:
+    normalized_term = term.strip().lower()
+    for filename in changed_filenames:
+        if normalized_term and normalized_term in filename.lower():
+            return filename
+    return changed_filenames[0] if changed_filenames else ""
+
+
+def _first_sample_line(sample: Mapping[str, object]) -> int:
+    matches = sample.get("matches")
+    if not isinstance(matches, list) or not matches:
+        return 1
+    first_match = matches[0]
+    if not isinstance(first_match, Mapping):
+        return 1
+    try:
+        line_number = int(first_match.get("line_number", 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, line_number)
+
+
+def _build_suggested_alignment_checks(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    changed_filenames: list[str],
+    overlap_candidates: list[dict[str, object]],
+    limit: int = 12,
+) -> list[dict[str, object]]:
+    suggestions: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    for candidate in overlap_candidates[:8]:
+        consumer_repo = str(candidate.get("repo", "")).strip()
+        if not consumer_repo:
+            continue
+        term_matches = candidate.get("term_matches")
+        if not isinstance(term_matches, list):
+            continue
+        for term_match in term_matches[:4]:
+            if not isinstance(term_match, Mapping):
+                continue
+            term = str(term_match.get("term", "")).strip()
+            provider_path = _find_provider_path_for_term(changed_filenames, term)
+            if not provider_path:
+                continue
+            samples = term_match.get("samples")
+            if not isinstance(samples, list):
+                continue
+            for sample in samples[:2]:
+                if not isinstance(sample, Mapping):
+                    continue
+                consumer_path = str(sample.get("filename", "")).strip()
+                if not consumer_path:
+                    continue
+
+                anchor_line = _first_sample_line(sample)
+                consumer_start_line = max(1, anchor_line - 5)
+                consumer_end_line = consumer_start_line + 19
+                dedup_key = "|".join(
+                    [provider_path, consumer_repo, consumer_path, str(consumer_start_line), str(consumer_end_line)]
+                )
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+                suggestions.append(
+                    {
+                        "term": term,
+                        "provider_owner": owner,
+                        "provider_repo": repo,
+                        "provider_pr_number": pr_number,
+                        "provider_path": provider_path,
+                        "provider_start_line": 1,
+                        "provider_end_line": 60,
+                        "provider_ref_side": "head",
+                        "consumer_repo": consumer_repo,
+                        "consumer_path": consumer_path,
+                        "consumer_start_line": consumer_start_line,
+                        "consumer_end_line": consumer_end_line,
+                    }
+                )
+                if len(suggestions) >= limit:
+                    return suggestions
+
+    return suggestions
+
+
 async def main():
     try:
         cli = parse_args()
@@ -348,6 +437,13 @@ async def main():
                 "endpoint_method_route_validation",
                 "downstream_payload_mapping_validation",
             ],
+            "suggested_alignment_checks": _build_suggested_alignment_checks(
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                changed_filenames=changed_filenames,
+                overlap_candidates=overlap_candidates,
+            ),
             "validation_summary": {
                 "source_pr_has_contract_artifacts": source_pr_has_contract_artifacts,
                 "overlap_candidate_count": len(overlap_candidates),

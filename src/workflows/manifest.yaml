@@ -107,9 +107,9 @@ workflows:
       context_lines:
         type: integer
         required: false
-        default: 2
+        default: 5
         minimum: 0
-        maximum: 2
+        maximum: 10
         description: Context lines around each match.
       expand_variants:
         type: boolean
@@ -119,7 +119,7 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 2
+          command: symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5
       - call: run_workflow_cli
         args:
           command: symbol_usage --term add_to_pantry --repo github.com/acme/ui --expand-variants true --limit 8
@@ -131,7 +131,7 @@ workflows:
       - Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).
       - For definitions use `symbol_definition` instead.
       - Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
-      - "`context_lines` is hard-limited to 2."
+      - "`context_lines` is hard-limited to 10."
     expected_output_shape:
       mode: string
       input: object
@@ -274,18 +274,18 @@ workflows:
       ref_sha: string
       evidence_origin: string
 
-  - id: pr_context_summary
-    summary: Build concise PR context from GitHub metadata and file list.
-    when_to_use: Use first for pull-request scoped analysis before deeper workflows.
+  - id: pr_impact_assessment
+    summary: Build source PR metadata, compact files, and change-surface impact in one workflow.
+    when_to_use: Use first for pull-request scoped impact discovery before overlap and validation workflows.
     required_args:
       - owner
       - repo
       - pr_number
-    example: 'run_workflow_cli(command="pr_context_summary --owner acme --repo checkout --pr-number 123")'
+    example: 'run_workflow_cli(command="pr_impact_assessment --owner acme --repo checkout --pr-number 123")'
     description: |
-      Retrieves PR metadata and changed files from GitHub and returns a compact summary.
-      This is the baseline context workflow for PR-scoped sessions.
-    script_path: workflows/scripts/pr_context_summary.py
+      Retrieves PR metadata and changed files from GitHub, then computes compact file summaries and
+      impact aggregates (status mix, directories, extensions, and largest deltas) in one response.
+    script_path: workflows/scripts/pr_impact_assessment.py
     arg_schema:
       owner:
         type: string
@@ -303,68 +303,26 @@ workflows:
     examples:
       - call: run_workflow_cli
         args:
-          command: pr_context_summary --owner acme --repo checkout --pr-number 123
-      - call: run_workflow_cli
-        args:
-          command: pr_context_summary --owner acme --repo checkout --pr-number 123
-          timeout_seconds: 60
+          command: pr_impact_assessment --owner acme --repo checkout --pr-number 123
     constraints:
       - Requires GitHub API access (`GITHUB_TOKEN`).
-      - Returns compact file metadata, not full patches.
+      - Returns compact file metadata and impact aggregates, not full patches.
     expected_output_shape:
       owner: string
       repo: string
       pr_number: integer
       pr: object
       summary: object
-      files: list[object]
-
-  - id: pr_change_surface
-    summary: Analyze PR change surface by status, directory, and extension.
-    when_to_use: Use after `pr_context_summary` to assess blast radius and review hotspots.
-    required_args:
-      - owner
-      - repo
-      - pr_number
-    example: 'run_workflow_cli(command="pr_change_surface --owner acme --repo checkout --pr-number 123")'
-    description: |
-      Builds a structured change-surface report from PR files.
-      Includes totals, status mix, touched directories, extension-level stats, and largest file changes.
-    script_path: workflows/scripts/pr_change_surface.py
-    arg_schema:
-      owner:
-        type: string
-        required: true
-        description: Repository owner or organization.
-      repo:
-        type: string
-        required: true
-        description: Repository name.
-      pr_number:
-        type: integer
-        required: true
-        minimum: 1
-        description: Pull request number.
-    examples:
-      - call: run_workflow_cli
-        args:
-          command: pr_change_surface --owner acme --repo checkout --pr-number 123
-    constraints:
-      - Requires GitHub API access (`GITHUB_TOKEN`).
-      - Designed for topology/impact analysis rather than patch-level semantics.
-    expected_output_shape:
-      owner: string
-      repo: string
-      pr_number: integer
       totals: object
       status_counts: list[object]
       directory_counts: list[object]
       extension_summary: list[object]
       largest_files: list[object]
+      files: list[object]
 
   - id: pr_cross_repo_overlap_candidates
     summary: Find lexical overlap candidates for cross-repo contract checks.
-    when_to_use: Use for candidate generation after PR change-surface analysis.
+    when_to_use: Use for candidate generation after `pr_impact_assessment`.
     required_args:
       - owner
       - repo
@@ -434,8 +392,100 @@ workflows:
       coverage_complete: boolean
       coverage_reason: string
       required_followup_angles: list[string]
+      suggested_alignment_checks: list[object]
       validation_summary: object
       errors: list[object]
+
+  - id: validate_contract_alignment
+    summary: Heuristically compare provider and consumer contract signals across repo boundaries.
+    when_to_use: Use after overlap discovery to validate provider-vs-consumer drift in focused file ranges.
+    required_args:
+      - provider_owner
+      - provider_repo
+      - provider_pr_number
+      - provider_path
+      - provider_start_line
+      - provider_end_line
+      - consumer_repo
+      - consumer_path
+      - consumer_start_line
+      - consumer_end_line
+    example: 'run_workflow_cli(command="validate_contract_alignment --provider-owner acme --provider-repo checkout --provider-pr-number 123 --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --provider-ref-side head --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90")'
+    description: |
+      Fetches provider content from the source PR (GitHub head/base SHA) and consumer content from a cross-repo
+      indexed file range (Zoekt), then compares extracted keys, parameters, and HTTP signatures.
+      Returns structured drift findings with coverage warnings when extraction is sparse.
+    script_path: workflows/scripts/validate_contract_alignment.py
+    arg_schema:
+      provider_owner:
+        type: string
+        required: true
+        description: Source PR owner/org for provider-side reads.
+      provider_repo:
+        type: string
+        required: true
+        description: Source PR repository name for provider-side reads.
+      provider_pr_number:
+        type: integer
+        required: true
+        minimum: 1
+        description: Source pull request number.
+      provider_path:
+        type: string
+        required: true
+        description: Provider-side file path in the source repository.
+      provider_start_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: Provider-side 1-indexed start line.
+      provider_end_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: Provider-side 1-indexed end line.
+      provider_ref_side:
+        type: string
+        required: false
+        default: head
+        description: Source PR ref side (`head` or `base`) for provider reads.
+      consumer_repo:
+        type: string
+        required: true
+        description: Consumer repository identifier in Zoekt.
+      consumer_path:
+        type: string
+        required: true
+        description: Consumer-side file path in the indexed repository.
+      consumer_start_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: Consumer-side 1-indexed start line.
+      consumer_end_line:
+        type: integer
+        required: true
+        minimum: 1
+        description: Consumer-side 1-indexed end line.
+    examples:
+      - call: run_workflow_cli
+        args:
+          command: validate_contract_alignment --provider-owner acme --provider-repo checkout --provider-pr-number 123 --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --provider-ref-side head --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90
+    constraints:
+      - Provider reads are GitHub-backed and require `GITHUB_TOKEN`.
+      - Consumer reads are Zoekt-backed and must target indexed repositories.
+      - "Hard limit: each requested line window must be <= 60 lines."
+      - Heuristic extraction can be partial; use `coverage_complete` and warnings to calibrate confidence.
+    expected_output_shape:
+      provider: object
+      consumer: object
+      signals: object
+      alignment: object
+      findings: list[object]
+      warnings: list[string]
+      coverage_complete: boolean
+      coverage_reason: string
+      signal_counts: object
 
 runtime_tools:
   - id: runtime.search
@@ -463,7 +513,7 @@ runtime_tools:
           context_lines: 1
     constraints:
       - Respect small limits and focused queries.
-      - "`context_lines` is hard-limited to 2."
+      - "`context_lines` is hard-limited to 10."
     expected_output_shape:
       results: list[object]
 

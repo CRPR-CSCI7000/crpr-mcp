@@ -18,7 +18,7 @@ def _write_manifest(path: Path) -> None:
                     "raw_query": {"type": "string", "required": False},
                     "repo": {"type": "string", "required": False},
                     "expand_variants": {"type": "boolean", "required": False, "default": False},
-                    "context_lines": {"type": "integer", "required": False, "default": 2, "minimum": 0, "maximum": 2},
+                    "context_lines": {"type": "integer", "required": False, "default": 5, "minimum": 0, "maximum": 10},
                 },
             }
         ]
@@ -42,21 +42,21 @@ def _build_runner(tmp_path: Path) -> ExecutionRunner:
 def test_parse_workflow_cli_rejects_integer_above_maximum(tmp_path: Path) -> None:
     runner = _build_runner(tmp_path)
 
-    with pytest.raises(ValueError, match="must be <= 2"):
-        runner.parse_workflow_cli_command('symbol_usage --term "ProcessOrder" --context-lines 3')
+    with pytest.raises(ValueError, match="must be <= 10"):
+        runner.parse_workflow_cli_command('symbol_usage --term "ProcessOrder" --context-lines 11')
 
 
 def test_parse_workflow_cli_accepts_integer_within_bounds(tmp_path: Path) -> None:
     runner = _build_runner(tmp_path)
 
     workflow_id, args = runner.parse_workflow_cli_command(
-        'symbol_usage --term "ProcessOrder" --repo "github.com/acme/ui" --context-lines 2'
+        'symbol_usage --term "ProcessOrder" --repo "github.com/acme/ui" --context-lines 10'
     )
 
     assert workflow_id == "symbol_usage"
     assert args["term"] == "ProcessOrder"
     assert args["repo"] == "github.com/acme/ui"
-    assert args["context_lines"] == 2
+    assert args["context_lines"] == 10
 
 
 def test_parse_workflow_cli_applies_default_and_keeps_it_bounded(tmp_path: Path) -> None:
@@ -65,7 +65,7 @@ def test_parse_workflow_cli_applies_default_and_keeps_it_bounded(tmp_path: Path)
     workflow_id, args = runner.parse_workflow_cli_command('symbol_usage --term "ProcessOrder"')
 
     assert workflow_id == "symbol_usage"
-    assert args["context_lines"] == 2
+    assert args["context_lines"] == 5
     assert args["expand_variants"] is False
 
 
