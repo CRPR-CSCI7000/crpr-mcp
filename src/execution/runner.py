@@ -215,9 +215,13 @@ class ExecutionRunner:
             temp_script_path = temp_dir / "workflow_script.py"
             runtime_src = self.src_root / "runtime"
             runtime_dst = temp_dir / "runtime"
+            utils_src = self.src_root / "utils"
+            utils_dst = temp_dir / "utils"
 
             shutil.copy2(script_path, temp_script_path)
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
+            if utils_src.exists():
+                shutil.copytree(utils_src, utils_dst, dirs_exist_ok=True)
 
             command = self._build_isolated_command(temp_script_path, args)
 
@@ -246,9 +250,13 @@ class ExecutionRunner:
             script_path = temp_dir / "custom_workflow_code.py"
             runtime_src = self.src_root / "runtime"
             runtime_dst = temp_dir / "runtime"
+            utils_src = self.src_root / "utils"
+            utils_dst = temp_dir / "utils"
 
             script_path.write_text(code, encoding="utf-8")
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
+            if utils_src.exists():
+                shutil.copytree(utils_src, utils_dst, dirs_exist_ok=True)
 
             command = self._build_custom_workflow_command(script_path)
 

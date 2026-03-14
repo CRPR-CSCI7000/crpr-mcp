@@ -61,3 +61,7 @@ CLAUDE.md
 
 # Ruff
 .ruff*
+
+# Private Credentials, ignore everything in the folder but the .gitkeep file
+privatecredentials/*
+!privatecredentials/.gitkeep
