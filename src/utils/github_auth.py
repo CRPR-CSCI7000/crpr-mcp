@@ -24,6 +24,7 @@ class _TokenCache:
 
 
 _cache: _TokenCache | None = None
+_last_auth_mode: str | None = None
 
 
 def _normalize_private_key(raw_key: str) -> str:
@@ -146,14 +147,22 @@ def _get_github_app_installation_token(base_url: str, timeout_seconds: int) -> s
 
 
 def resolve_github_token(base_url: str, timeout_seconds: int) -> str:
+    global _last_auth_mode
+
     token = _get_github_app_installation_token(base_url, timeout_seconds)
     if token:
+        if _last_auth_mode != "github_app":
+            logger.info("GitHub auth mode: github_app")
+            _last_auth_mode = "github_app"
         return token
     if is_github_app_configured():
         logger.warning("GitHub App auth failed; falling back to GITHUB_TOKEN if available.")
 
     pat = os.getenv("GITHUB_TOKEN")
     if pat:
+        if _last_auth_mode != "github_token":
+            logger.info("GitHub auth mode: github_token")
+            _last_auth_mode = "github_token"
         return pat
 
     raise GitHubRuntimeError("GitHub auth is not configured (GitHub App or GITHUB_TOKEN).")
