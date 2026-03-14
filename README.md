@@ -79,9 +79,13 @@ Required:
 
 - `ZOEKT_API_URL`
 
-Required for GitHub-backed PR workflows:
+Required for GitHub-backed PR workflows (GitHub App preferred, PAT fallback):
 
-- `GITHUB_TOKEN`
+- GitHub App (preferred)
+  - `GITHUB_APP_ID`
+  - `GITHUB_APP_INSTALLATION_ID`
+
+- `GITHUB_TOKEN` (PAT fallback when GitHub App auth is not configured or fails)
   - Used by workflows such as `pr_impact_assessment`,
     `pr_cross_repo_overlap_candidates`, `pr_file_context_reader`, and
     `validate_contract_alignment` (provider-side reads).
@@ -98,11 +102,11 @@ Optional:
 
 ## Local Dev
 
-Create local env file and set token if you use PR workflows:
+Create local env file and set GitHub auth if you use PR workflows:
 
 ```bash
 cp src/.env.sample src/.env
-# edit src/.env and set GITHUB_TOKEN
+# edit src/.env and set GitHub App values or GITHUB_TOKEN
 ```
 
 ```bash

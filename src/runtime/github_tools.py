@@ -1,9 +1,16 @@
 import os
 import time
 from base64 import b64decode
-from typing import Any
+from typing import Any, Callable
 
 import requests
+
+from utils.github_auth import (
+    GitHubRuntimeError,
+    build_auth_headers,
+    is_github_app_configured,
+    resolve_github_token,
+)
 
 DEFAULT_GITHUB_API_URL = "https://api.github.com"
 DEFAULT_PER_PAGE = 100
@@ -14,10 +21,6 @@ MAX_RETRIES = 3
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-class GitHubRuntimeError(RuntimeError):
-    """Raised when runtime wrappers fail to communicate with GitHub."""
-
-
 class GitHubRuntime:
     def __init__(
         self,
@@ -25,14 +28,18 @@ class GitHubRuntime:
         base_url: str | None = None,
         max_retries: int = MAX_RETRIES,
     ) -> None:
-        configured_token = token or os.getenv("GITHUB_TOKEN")
-        if not configured_token:
-            raise GitHubRuntimeError("GITHUB_TOKEN is not set")
-
         configured_base_url = base_url or os.getenv("GITHUB_API_URL", DEFAULT_GITHUB_API_URL)
         self.base_url = configured_base_url.rstrip("/")
-        self.token = configured_token
         self.max_retries = max(1, int(max_retries))
+        self._token_provider: Callable[[], str]
+        if token:
+            self._token_provider = lambda: token
+        else:
+            if not (is_github_app_configured() or os.getenv("GITHUB_TOKEN")):
+                raise GitHubRuntimeError("GitHub auth is not configured (GitHub App or GITHUB_TOKEN).")
+            self._token_provider = lambda: resolve_github_token(
+                self.base_url, timeout_seconds=REQUEST_TIMEOUT_SECONDS
+            )
 
     def get_pull_request(self, owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         path = f"/repos/{owner}/{repo}/pulls/{int(pr_number)}"
@@ -119,11 +126,7 @@ class GitHubRuntime:
         url: str,
         params: dict[str, Any] | None = None,
     ) -> requests.Response:
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
+        headers = build_auth_headers(self._token_provider())
 
         attempts = 0
         while attempts < self.max_retries:
