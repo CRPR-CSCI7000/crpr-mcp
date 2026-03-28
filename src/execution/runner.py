@@ -17,8 +17,6 @@ from .safety import validate_custom_workflow_code
 RESULT_MARKER = "__RESULT_JSON__="
 TIMEOUT_EXIT_CODE = 124
 _ENV_ALLOWLIST = {
-    "GITHUB_API_URL",
-    "GITHUB_TOKEN",
     "HOME",
     "LANG",
     "LC_ALL",
@@ -38,6 +36,7 @@ class ExecutionRunner:
         timeout_max: int,
         stdout_max_bytes: int,
         stderr_max_bytes: int,
+        github_rpc_url: str = "http://127.0.0.1:8080/internal/github-rpc",
     ) -> None:
         self.src_root = src_root
         self.manifest_path = manifest_path
@@ -45,6 +44,7 @@ class ExecutionRunner:
         self.timeout_max = timeout_max
         self.stdout_max_bytes = stdout_max_bytes
         self.stderr_max_bytes = stderr_max_bytes
+        self.github_rpc_url = str(github_rpc_url).strip() or "http://127.0.0.1:8080/internal/github-rpc"
         self._workflow_index = self._load_manifest()
 
     def _load_manifest(self) -> dict[str, dict[str, Any]]:
@@ -215,13 +215,9 @@ class ExecutionRunner:
             temp_script_path = temp_dir / "workflow_script.py"
             runtime_src = self.src_root / "runtime"
             runtime_dst = temp_dir / "runtime"
-            utils_src = self.src_root / "utils"
-            utils_dst = temp_dir / "utils"
 
             shutil.copy2(script_path, temp_script_path)
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
-            if utils_src.exists():
-                shutil.copytree(utils_src, utils_dst, dirs_exist_ok=True)
 
             command = self._build_isolated_command(temp_script_path, args)
 
@@ -250,13 +246,9 @@ class ExecutionRunner:
             script_path = temp_dir / "custom_workflow_code.py"
             runtime_src = self.src_root / "runtime"
             runtime_dst = temp_dir / "runtime"
-            utils_src = self.src_root / "utils"
-            utils_dst = temp_dir / "utils"
 
             script_path.write_text(code, encoding="utf-8")
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
-            if utils_src.exists():
-                shutil.copytree(utils_src, utils_dst, dirs_exist_ok=True)
 
             command = self._build_custom_workflow_command(script_path)
 
@@ -287,29 +279,31 @@ class ExecutionRunner:
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=str(cwd),
-                env=self._build_environment(),
+                env=self._build_environment(
+                    github_rpc_url=self.github_rpc_url,
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=normalized_timeout)
+            except asyncio.TimeoutError:
+                process.kill()
+                stdout_bytes, stderr_bytes = await process.communicate()
+                stdout = self._decode_and_cap(stdout_bytes, self.stdout_max_bytes, "stdout")
+                stderr = self._decode_and_cap(stderr_bytes, self.stderr_max_bytes, "stderr")
+                return ExecutionResult(
+                    success=False,
+                    exit_code=TIMEOUT_EXIT_CODE,
+                    stdout=stdout,
+                    stderr=(stderr + "\nexecution timed out" if stderr else "execution timed out"),
+                    timing_ms=self._elapsed_ms(start),
+                )
         except Exception as exc:
             return self._error_result(
                 message=f"runner failed to start subprocess: {exc}",
                 exit_code=70,
-                timing_ms=self._elapsed_ms(start),
-            )
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=normalized_timeout)
-        except asyncio.TimeoutError:
-            process.kill()
-            stdout_bytes, stderr_bytes = await process.communicate()
-            stdout = self._decode_and_cap(stdout_bytes, self.stdout_max_bytes, "stdout")
-            stderr = self._decode_and_cap(stderr_bytes, self.stderr_max_bytes, "stderr")
-            return ExecutionResult(
-                success=False,
-                exit_code=TIMEOUT_EXIT_CODE,
-                stdout=stdout,
-                stderr=(stderr + "\nexecution timed out" if stderr else "execution timed out"),
                 timing_ms=self._elapsed_ms(start),
             )
 
@@ -422,12 +416,13 @@ class ExecutionRunner:
         except (TypeError, ValueError):
             return None
 
-    def _build_environment(self) -> dict[str, str]:
+    def _build_environment(self, github_rpc_url: str) -> dict[str, str]:
         env: dict[str, str] = {}
         for key in _ENV_ALLOWLIST:
             value = os.environ.get(key)
             if value:
                 env[key] = value
+        env["CRPR_GITHUB_RPC_URL"] = github_rpc_url
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         return env

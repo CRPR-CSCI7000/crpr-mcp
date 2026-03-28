@@ -105,6 +105,27 @@ def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
     assert "addToPantry r:github.com/acme/ui" in argv
 
 
+def test_build_environment_omits_github_secrets_and_injects_rpc_url(tmp_path: Path, monkeypatch) -> None:
+    runner = _build_runner(tmp_path)
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY_PATH", "/tmp/github-app.pem")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_example")
+
+    env = runner._build_environment(
+        github_rpc_url="http://127.0.0.1:9999/internal/github-rpc",
+    )
+
+    assert env["CRPR_GITHUB_RPC_URL"] == "http://127.0.0.1:9999/internal/github-rpc"
+    assert "CRPR_GITHUB_RPC_TOKEN" not in env
+    assert "GITHUB_APP_ID" not in env
+    assert "GITHUB_APP_INSTALLATION_ID" not in env
+    assert "GITHUB_APP_PRIVATE_KEY_PATH" not in env
+    assert "GITHUB_APP_PRIVATE_KEY" not in env
+    assert "GITHUB_TOKEN" not in env
+
+
 def test_run_custom_workflow_code_accepts_plain_text_stdout() -> None:
     project_root = Path(__file__).resolve().parents[1]
     runner = ExecutionRunner(

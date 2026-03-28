@@ -23,3 +23,14 @@ class WorkflowCliRunRequest(BaseModel):
 class CustomWorkflowCodeRunRequest(BaseModel):
     code: str
     timeout_seconds: int = 30
+
+
+class GitHubRPCRequest(BaseModel):
+    method: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class GitHubRPCResponse(BaseModel):
+    ok: bool
+    result: JsonValue = None
+    error: str | None = None

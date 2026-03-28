@@ -12,7 +12,16 @@ from starlette.responses import JSONResponse, Response
 
 from .capabilities import CapabilityCatalog, CapabilityDoc, CapabilityHit, RuntimeHelperDoc
 from .config import ServerConfig
-from .execution import CustomWorkflowCodeRunRequest, ExecutionResult, ExecutionRunner, WorkflowCliRunRequest
+from .execution import (
+    CustomWorkflowCodeRunRequest,
+    ExecutionResult,
+    ExecutionRunner,
+    GitHubRPCRequest,
+    GitHubRPCResponse,
+    WorkflowCliRunRequest,
+)
+from .execution.github_auth import GitHubRuntimeError
+from .execution.github_rpc_proxy import GitHubRPCProxy
 from .execution.safety import get_allowed_runtime_modules
 from .prompts import PromptManager
 from .workflows import format_workflow_result_markdown
@@ -36,6 +45,8 @@ class CrprMCPServer:
         self.manifest_path = self.src_root / "workflows" / "manifest.yaml"
 
         self.capability_catalog = CapabilityCatalog(self.manifest_path)
+        self.github_rpc_proxy = GitHubRPCProxy()
+        github_rpc_url = f"http://127.0.0.1:{self.config.streamable_http_port}/internal/github-rpc"
         self.execution_runner = ExecutionRunner(
             src_root=self.src_root,
             manifest_path=self.manifest_path,
@@ -43,6 +54,7 @@ class CrprMCPServer:
             timeout_max=self.config.execution_timeout_max,
             stdout_max_bytes=self.config.execution_stdout_max_bytes,
             stderr_max_bytes=self.config.execution_stderr_max_bytes,
+            github_rpc_url=github_rpc_url,
         )
 
     def _load_prompts(self) -> None:
@@ -712,7 +724,36 @@ class CrprMCPServer:
             self.server.tool(tool_func, name=tool_name, description=description)
             logger.info("Registered tool: %s", tool_name)
 
-    def _register_health_endpoints(self) -> None:
+    def _register_http_routes(self) -> None:
+        @self.server.custom_route("/internal/github-rpc", methods=["POST"])
+        async def github_rpc(request: Request) -> Response:
+            try:
+                raw_payload = await request.json()
+            except Exception:
+                return JSONResponse({"ok": False, "error": "invalid json payload"}, status_code=400)
+
+            try:
+                rpc_request = GitHubRPCRequest.model_validate(raw_payload)
+            except Exception as exc:
+                return JSONResponse({"ok": False, "error": f"invalid rpc request: {exc}"}, status_code=400)
+
+            try:
+                result = await asyncio.to_thread(
+                    self.github_rpc_proxy.dispatch,
+                    rpc_request.method,
+                    rpc_request.params,
+                )
+            except GitHubRuntimeError as exc:
+                response = GitHubRPCResponse(ok=False, error=str(exc))
+                return JSONResponse(response.model_dump(mode="json"), status_code=400)
+            except Exception as exc:
+                logger.exception("GitHub RPC dispatch failed: %s", exc)
+                response = GitHubRPCResponse(ok=False, error="internal proxy error")
+                return JSONResponse(response.model_dump(mode="json"), status_code=500)
+
+            response = GitHubRPCResponse(ok=True, result=result)
+            return JSONResponse(response.model_dump(mode="json"))
+
         @self.server.custom_route("/health", methods=["GET"])
         async def health_check(request: Request) -> Response:
             return JSONResponse({"status": "ok", "service": "crpr-mcp"})
@@ -765,7 +806,7 @@ class CrprMCPServer:
         signal.signal(signal.SIGTERM, lambda sig, frame: self.signal_handler(sig, frame))
 
         self._register_tools()
-        self._register_health_endpoints()
+        self._register_http_routes()
 
         try:
             logger.info("Starting CRPR MCP server...")

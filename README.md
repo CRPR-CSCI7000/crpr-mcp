@@ -10,7 +10,7 @@ Single service/process with embedded modules:
 - `execution/`: request/result models, AST safety checks, and isolated runner
 - `workflows/`: workflow manifest and prebuilt scripts
 - `runtime/zoekt_tools.py`: safe Python wrappers over Zoekt HTTP endpoints
-- `runtime/github_tools.py`: safe Python wrappers over GitHub PR/content endpoints
+- `runtime/github_tools.py`: subprocess-safe wrappers that call parent-owned GitHub RPC on internal FastMCP route
 
 There is no separate executor service.
 
@@ -65,6 +65,7 @@ Generated scripts are AST-validated before execution:
 - Every run executes in an isolated temp working directory.
 - Subprocess invocation uses `python -I -u`.
 - Environment is reduced to an allowlist.
+- GitHub API calls are parent-owned via local RPC; subprocesses do not receive GitHub PAT/App secrets.
 - Timeout and stdout/stderr caps are enforced.
 - Result payload is parsed from stdout:
   - plain JSON stdout -> parsed JSON result

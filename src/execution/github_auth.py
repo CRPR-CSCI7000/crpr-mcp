@@ -149,13 +149,14 @@ def _get_github_app_installation_token(base_url: str, timeout_seconds: int) -> s
 def resolve_github_token(base_url: str, timeout_seconds: int) -> str:
     global _last_auth_mode
 
+    app_configured = is_github_app_configured()
     token = _get_github_app_installation_token(base_url, timeout_seconds)
     if token:
         if _last_auth_mode != "github_app":
             logger.info("GitHub auth mode: github_app")
             _last_auth_mode = "github_app"
         return token
-    if is_github_app_configured():
+    if app_configured:
         logger.warning("GitHub App auth failed; falling back to GITHUB_TOKEN if available.")
 
     pat = os.getenv("GITHUB_TOKEN")
@@ -165,4 +166,16 @@ def resolve_github_token(base_url: str, timeout_seconds: int) -> str:
             _last_auth_mode = "github_token"
         return pat
 
-    raise GitHubRuntimeError("GitHub auth is not configured (GitHub App or GITHUB_TOKEN).")
+    if app_configured:
+        raise GitHubRuntimeError(
+            "GitHub App auth is configured but failed to mint an installation token, "
+            "and GITHUB_TOKEN fallback is not set. "
+            "Check GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, "
+            "GITHUB_APP_PRIVATE_KEY/GITHUB_APP_PRIVATE_KEY_PATH, and app installation access."
+        )
+
+    raise GitHubRuntimeError(
+        "GitHub auth is not configured. Set GITHUB_TOKEN or configure GitHub App auth "
+        "(GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY or "
+        "GITHUB_APP_PRIVATE_KEY_PATH)."
+    )
