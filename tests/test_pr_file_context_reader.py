@@ -6,7 +6,7 @@ from pathlib import Path
 
 def _load_module():
     script_path = (
-        Path(__file__).resolve().parents[1] / "src" / "workflows" / "scripts" / "pr_file_context_reader.py"
+        Path(__file__).resolve().parents[1] / "src" / "skills" / "workflows" / "scripts" / "pr_file_context_reader.py"
     )
     spec = importlib.util.spec_from_file_location("pr_file_context_reader_script", script_path)
     if spec is None or spec.loader is None:

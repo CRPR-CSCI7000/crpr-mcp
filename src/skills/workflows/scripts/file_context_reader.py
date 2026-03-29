@@ -2,10 +2,23 @@ import argparse
 import asyncio
 import json
 
+from pydantic import BaseModel, Field
+
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
 MAX_LINE_WINDOW = 60
+
+
+class OutputModel(BaseModel):
+    source_owner: str
+    source_repo: str
+    repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    path: str
+    start_line: int
+    end_line: int
+    content: str
+    evidence_origin: str
 
 
 def parse_args(argv=None):
@@ -84,6 +97,7 @@ async def main():
             "content": content,
             "evidence_origin": "zoekt_index",
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:

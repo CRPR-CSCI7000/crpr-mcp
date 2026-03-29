@@ -4,6 +4,9 @@ import json
 import re
 from collections import OrderedDict
 from collections.abc import Mapping
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from runtime import github_tools, zoekt_tools
 
@@ -60,6 +63,27 @@ _CONTRACT_SIGNAL_TOKENS = {
     "webhook",
 }
 _CONTRACT_SIGNAL_EXTENSIONS = (".proto", ".avsc")
+
+
+class OutputModel(BaseModel):
+    owner: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    pr_number: int = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    include_source_repo: bool
+    inspected_repo_count: int
+    excluded_source_repos: list[str]
+    changed_files: list[str]
+    search_terms: list[str]
+    overlap_candidates: list[dict[str, Any]]
+    confirmed_conflicts: list[dict[str, Any]]
+    no_confirmed_conflicts: bool
+    no_confirmed_conflicts_reason: str
+    coverage_complete: bool
+    coverage_reason: str
+    required_followup_angles: list[str]
+    suggested_alignment_checks: list[dict[str, Any]]
+    validation_summary: dict[str, Any]
+    errors: list[dict[str, Any]]
 
 
 def parse_args(argv=None):
@@ -451,6 +475,7 @@ async def main():
             },
             "errors": errors,
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:

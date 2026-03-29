@@ -2,11 +2,25 @@ import argparse
 import asyncio
 import json
 import re
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
 MAX_CONTEXT_LINES = 10
+
+
+class OutputModel(BaseModel):
+    mode: str
+    input: dict[str, Any]
+    attempted_queries: list[dict[str, Any]]
+    total_queries: int
+    total_raw_hits: int
+    results: list[dict[str, Any]]
+    total_hits: int
+    context_lines: int = Field(..., json_schema_extra={"include_in_summary": False})
 
 
 def parse_args(argv=None):
@@ -260,6 +274,7 @@ async def main():
             "context_lines": context_lines,
             "results": deduped_results[:limit],
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:

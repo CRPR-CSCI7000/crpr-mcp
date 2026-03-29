@@ -1,7 +1,7 @@
 import pathlib
 from typing import Any, Callable
 
-from ..execution.models import ExecutionResult
+from ...execution.models import ExecutionResult
 
 
 def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -> str:

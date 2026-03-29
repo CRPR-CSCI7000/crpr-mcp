@@ -2,36 +2,74 @@ import asyncio
 from pathlib import Path
 
 import pytest
-import yaml
 
-from execution.runner import ExecutionRunner
+from src.execution.runner import ExecutionRunner
 
 
-def _write_manifest(path: Path) -> None:
-    manifest = {
-        "workflows": [
-            {
-                "id": "symbol_usage",
-                "script_path": "workflows/scripts/symbol_usage.py",
-                "arg_schema": {
-                    "term": {"type": "string", "required": False},
-                    "raw_query": {"type": "string", "required": False},
-                    "repo": {"type": "string", "required": False},
-                    "expand_variants": {"type": "boolean", "required": False, "default": False},
-                    "context_lines": {"type": "integer", "required": False, "default": 5, "minimum": 0, "maximum": 10},
-                },
-            }
-        ]
-    }
-    path.write_text(yaml.safe_dump(manifest), encoding="utf-8")
+def _write_skill(skills_root: Path) -> None:
+    skill_path = skills_root / "capabilities" / "symbol_usage.md"
+    script_path = skills_root / "workflows" / "scripts" / "symbol_usage.py"
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(
+        """---
+id: symbol_usage
+doc_type: capability
+kind: workflow
+order: 1
+execution:
+  script_path: skills/workflows/scripts/symbol_usage.py
+  arg_schema:
+    term:
+      type: string
+      required: false
+    raw_query:
+      type: string
+      required: false
+    repo:
+      type: string
+      required: false
+    expand_variants:
+      type: boolean
+      required: false
+      default: false
+    context_lines:
+      type: integer
+      required: false
+      default: 5
+      minimum: 0
+      maximum: 10
+---
+
+--- list_capabilities ---
+- Summary: test
+- When to use: test
+
+--- read_capability ---
+## test
+### Expected Output Summary
+Returns a JSON object with:
+{{EXPECTED_OUTPUT_SUMMARY}}
+""",
+        encoding="utf-8",
+    )
+    script_path.write_text(
+        """from pydantic import BaseModel
+
+
+class OutputModel(BaseModel):
+    mode: str
+""",
+        encoding="utf-8",
+    )
 
 
 def _build_runner(tmp_path: Path) -> ExecutionRunner:
-    manifest_path = tmp_path / "manifest.yaml"
-    _write_manifest(manifest_path)
+    skills_root = tmp_path / "skills"
+    _write_skill(skills_root)
     return ExecutionRunner(
         src_root=tmp_path,
-        manifest_path=manifest_path,
+        skills_root=skills_root,
         timeout_default=30,
         timeout_max=120,
         stdout_max_bytes=32768,
@@ -130,7 +168,7 @@ def test_run_custom_workflow_code_accepts_plain_text_stdout() -> None:
     project_root = Path(__file__).resolve().parents[1]
     runner = ExecutionRunner(
         src_root=project_root / "src",
-        manifest_path=project_root / "src" / "workflows" / "manifest.yaml",
+        skills_root=project_root / "src" / "skills",
         timeout_default=30,
         timeout_max=120,
         stdout_max_bytes=32768,
@@ -148,7 +186,7 @@ def test_run_custom_workflow_code_accepts_plain_json_stdout() -> None:
     project_root = Path(__file__).resolve().parents[1]
     runner = ExecutionRunner(
         src_root=project_root / "src",
-        manifest_path=project_root / "src" / "workflows" / "manifest.yaml",
+        skills_root=project_root / "src" / "skills",
         timeout_default=30,
         timeout_max=120,
         stdout_max_bytes=32768,

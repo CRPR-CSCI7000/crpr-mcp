@@ -9,8 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from ..skills.registry import SkillRegistry
 from .models import ExecutionResult
 from .safety import validate_custom_workflow_code
 
@@ -31,7 +30,7 @@ class ExecutionRunner:
     def __init__(
         self,
         src_root: Path,
-        manifest_path: Path,
+        skills_root: Path,
         timeout_default: int,
         timeout_max: int,
         stdout_max_bytes: int,
@@ -39,23 +38,29 @@ class ExecutionRunner:
         github_rpc_url: str = "http://127.0.0.1:8080/internal/github-rpc",
     ) -> None:
         self.src_root = src_root
-        self.manifest_path = manifest_path
+        self.skills_root = skills_root
         self.timeout_default = timeout_default
         self.timeout_max = timeout_max
         self.stdout_max_bytes = stdout_max_bytes
         self.stderr_max_bytes = stderr_max_bytes
         self.github_rpc_url = str(github_rpc_url).strip() or "http://127.0.0.1:8080/internal/github-rpc"
-        self._workflow_index = self._load_manifest()
+        self._workflow_index = self._load_workflows()
 
-    def _load_manifest(self) -> dict[str, dict[str, Any]]:
-        with self.manifest_path.open("r", encoding="utf-8") as manifest_file:
-            raw = yaml.safe_load(manifest_file) or {}
-
+    def _load_workflows(self) -> dict[str, dict[str, Any]]:
+        registry = SkillRegistry(self.skills_root)
         workflow_index: dict[str, dict[str, Any]] = {}
-        for workflow in raw.get("workflows", []):
-            workflow_id = workflow.get("id")
-            if workflow_id:
-                workflow_index[workflow_id] = workflow
+
+        for capability in registry.capabilities.values():
+            if capability.kind != "workflow":
+                continue
+            if not capability.script_path:
+                raise ValueError(f"workflow capability missing execution.script_path: {capability.id}")
+            workflow_index[capability.id] = {
+                "id": capability.id,
+                "script_path": capability.script_path,
+                "arg_schema": capability.arg_schema,
+            }
+
         return workflow_index
 
     def parse_workflow_cli_command(self, command: str) -> tuple[str, dict[str, Any]]:

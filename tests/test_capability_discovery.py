@@ -1,30 +1,30 @@
 import asyncio
 from pathlib import Path
 
-from src.capabilities import CapabilityCatalog
 from src.config import ServerConfig
 from src.server import CrprMCPServer
+from src.skills.registry import SkillRegistry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _manifest_path() -> Path:
-    return PROJECT_ROOT / "src" / "workflows" / "manifest.yaml"
+def _skills_root() -> Path:
+    return PROJECT_ROOT / "src" / "skills"
 
 
 def test_list_capabilities_excludes_runtime_entries() -> None:
-    catalog = CapabilityCatalog(_manifest_path())
-    hits = catalog.list_capabilities()
+    registry = SkillRegistry(_skills_root())
+    capabilities = list(registry.capabilities.values())
 
-    assert hits
-    assert all(hit.kind in {"workflow", "execution_pattern"} for hit in hits)
-    assert all(not hit.id.startswith("runtime.") for hit in hits)
+    assert capabilities
+    assert all(skill.kind in {"workflow", "execution_pattern"} for skill in capabilities)
+    assert all(not skill.id.startswith("runtime.") for skill in capabilities)
 
 
 def test_read_capability_runtime_id_is_unknown() -> None:
-    catalog = CapabilityCatalog(_manifest_path())
-    assert catalog.read("runtime.search") is None
-    assert catalog.read("runtime.github_get_pull_request") is None
+    registry = SkillRegistry(_skills_root())
+    assert registry.capabilities.get("runtime.search") is None
+    assert registry.capabilities.get("runtime.github_get_pull_request") is None
 
 
 def test_read_capability_custom_workflow_includes_runtime_helpers(monkeypatch) -> None:

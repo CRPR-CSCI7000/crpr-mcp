@@ -1,4 +1,4 @@
-from execution.safety import validate_custom_workflow_code
+from src.execution.safety import validate_custom_workflow_code
 
 
 def test_allows_from_runtime_import_zoekt_tools() -> None:

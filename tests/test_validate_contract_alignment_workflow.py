@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def _load_script_module(script_name: str):
-    script_path = Path(__file__).resolve().parents[1] / "src" / "workflows" / "scripts" / script_name
+    script_path = Path(__file__).resolve().parents[1] / "src" / "skills" / "workflows" / "scripts" / script_name
     spec = importlib.util.spec_from_file_location(f"{script_name}_module", script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"failed to load script module: {script_name}")

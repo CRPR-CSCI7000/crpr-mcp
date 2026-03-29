@@ -2,9 +2,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from execution.github_rpc_proxy import GitHubRPCProxy
-from execution.github_rpc_proxy import GitHubRuntimeError as GitHubRPCProxyError
 from runtime.github_tools import GitHubRuntime, GitHubRuntimeError
+from src.execution.github_rpc_proxy import GitHubRPCProxy
+from src.execution.github_rpc_proxy import GitHubRuntimeError as GitHubRPCProxyError
 
 
 def _response(status_code: int, payload, link: str = "") -> Mock:
@@ -56,7 +56,7 @@ def test_parent_runtime_list_pull_request_files_paginates_until_exhausted() -> N
     )
     page_two = _response(200, [{"filename": f"file-{index}.py"} for index in range(100, 120)])
 
-    with patch("execution.github_rpc_proxy.requests.request", side_effect=[page_one, page_two]) as request_mock:
+    with patch("src.execution.github_rpc_proxy.requests.request", side_effect=[page_one, page_two]) as request_mock:
         files = runtime.list_pull_request_files("acme", "checkout", 1)
 
     assert len(files) == 120
@@ -73,8 +73,8 @@ def test_parent_runtime_request_retries_on_transient_error_before_success() -> N
     success = _response(200, {"number": 7, "title": "ok"})
 
     with (
-        patch("execution.github_rpc_proxy.requests.request", side_effect=[transient, success]) as request_mock,
-        patch("execution.github_rpc_proxy.time.sleep") as sleep_mock,
+        patch("src.execution.github_rpc_proxy.requests.request", side_effect=[transient, success]) as request_mock,
+        patch("src.execution.github_rpc_proxy.time.sleep") as sleep_mock,
     ):
         pr = runtime.get_pull_request("acme", "checkout", 7)
 
@@ -88,7 +88,7 @@ def test_parent_runtime_request_raises_with_error_body_for_non_retryable_failure
     not_found = _response(404, {"message": "not found"})
     not_found.text = '{"message":"not found"}'
 
-    with patch("execution.github_rpc_proxy.requests.request", return_value=not_found):
+    with patch("src.execution.github_rpc_proxy.requests.request", return_value=not_found):
         with pytest.raises(GitHubRPCProxyError, match="status 404"):
             runtime.get_pull_request("acme", "checkout", 404)
 
@@ -102,7 +102,7 @@ def test_parent_runtime_get_file_content_decodes_base64_payload() -> None:
     }
     contents = _response(200, contents_payload)
 
-    with patch("execution.github_rpc_proxy.requests.request", return_value=contents):
+    with patch("src.execution.github_rpc_proxy.requests.request", return_value=contents):
         text = runtime.get_file_content("acme", "checkout", "src/main.py", ref="abc123")
 
     assert text == "hello world\n"
@@ -113,6 +113,6 @@ def test_parent_runtime_get_file_content_rejects_directory_payload() -> None:
     directory_payload = [{"path": "src"}]
     directory_response = _response(200, directory_payload)
 
-    with patch("execution.github_rpc_proxy.requests.request", return_value=directory_response):
+    with patch("src.execution.github_rpc_proxy.requests.request", return_value=directory_response):
         with pytest.raises(GitHubRPCProxyError, match="directory"):
             runtime.get_file_content("acme", "checkout", "src")

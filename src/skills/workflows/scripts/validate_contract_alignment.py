@@ -3,6 +3,9 @@ import asyncio
 import json
 import re
 from collections.abc import Iterable, Mapping
+from typing import Any
+
+from pydantic import BaseModel
 
 from runtime import github_tools, zoekt_tools
 
@@ -24,6 +27,18 @@ _GENERIC_PARAM_NAMES = {
     "data",
 }
 _METHOD_TOKEN_RE = re.compile(r"(get|post|put|patch|delete|options|head)", re.IGNORECASE)
+
+
+class OutputModel(BaseModel):
+    provider: dict[str, Any]
+    consumer: dict[str, Any]
+    signals: dict[str, Any]
+    alignment: dict[str, Any]
+    findings: list[dict[str, Any]]
+    warnings: list[str]
+    coverage_complete: bool
+    coverage_reason: str
+    signal_counts: dict[str, Any]
 
 
 def parse_args(argv=None):
@@ -368,6 +383,7 @@ async def main():
                 "consumer": consumer_signal_count,
             },
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:

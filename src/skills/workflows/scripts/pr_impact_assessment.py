@@ -2,10 +2,27 @@ import argparse
 import asyncio
 import json
 from collections import Counter, defaultdict
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 from runtime import github_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
+
+
+class OutputModel(BaseModel):
+    owner: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    pr_number: int = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    pr: dict[str, Any]
+    summary: dict[str, Any] = Field(..., json_schema_extra={"summary_role": "summary_details"})
+    totals: dict[str, Any]
+    status_counts: list[dict[str, Any]]
+    directory_counts: list[dict[str, Any]]
+    extension_summary: list[dict[str, Any]]
+    largest_files: list[dict[str, Any]]
+    files: list[dict[str, Any]] = Field(..., json_schema_extra={"summary_role": "file_list_summary"})
 
 
 def parse_args(argv=None):
@@ -148,6 +165,7 @@ async def main():
             "largest_files": compact_files[:20],
             "files": compact_files,
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:

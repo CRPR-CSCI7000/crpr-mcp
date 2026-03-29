@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def _load_file_context_reader_module():
-    script_path = Path(__file__).resolve().parents[1] / "src" / "workflows" / "scripts" / "file_context_reader.py"
+    script_path = Path(__file__).resolve().parents[1] / "src" / "skills" / "workflows" / "scripts" / "file_context_reader.py"
     spec = importlib.util.spec_from_file_location("file_context_reader_script", script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load file_context_reader script module")

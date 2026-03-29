@@ -10,21 +10,20 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from .capabilities import CapabilityCatalog, CapabilityDoc, CapabilityHit, RuntimeHelperDoc
 from .config import ServerConfig
-from .execution import (
+from .execution.github_auth import GitHubRuntimeError
+from .execution.github_rpc_proxy import GitHubRPCProxy
+from .execution.models import (
     CustomWorkflowCodeRunRequest,
     ExecutionResult,
-    ExecutionRunner,
     GitHubRPCRequest,
     GitHubRPCResponse,
     WorkflowCliRunRequest,
 )
-from .execution.github_auth import GitHubRuntimeError
-from .execution.github_rpc_proxy import GitHubRPCProxy
+from .execution.runner import ExecutionRunner
 from .execution.safety import get_allowed_runtime_modules
-from .prompts import PromptManager
-from .workflows import format_workflow_result_markdown
+from .skills.registry import SkillRegistry
+from .skills.workflows.renderers import format_workflow_result_markdown
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,24 +31,27 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 class CrprMCPServer:
+    _DISCOVERY_ITEMS_PLACEHOLDER = "{{DISCOVERY_ITEMS}}"
+
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
         self.server = FastMCP()
         self._shutdown_requested = False
 
         self._setup_runtime()
-        self._load_prompts()
+        self._validate_view_placeholders()
+        self._load_tool_descriptions()
 
     def _setup_runtime(self) -> None:
         self.src_root = pathlib.Path(__file__).parent
-        self.manifest_path = self.src_root / "workflows" / "manifest.yaml"
+        self.skills_root = self.src_root / "skills"
 
-        self.capability_catalog = CapabilityCatalog(self.manifest_path)
+        self.skill_registry = SkillRegistry(skills_root=self.skills_root)
         self.github_rpc_proxy = GitHubRPCProxy()
         github_rpc_url = f"http://127.0.0.1:{self.config.streamable_http_port}/internal/github-rpc"
         self.execution_runner = ExecutionRunner(
             src_root=self.src_root,
-            manifest_path=self.manifest_path,
+            skills_root=self.skills_root,
             timeout_default=self.config.execution_timeout_default,
             timeout_max=self.config.execution_timeout_max,
             stdout_max_bytes=self.config.execution_stdout_max_bytes,
@@ -57,44 +59,31 @@ class CrprMCPServer:
             github_rpc_url=github_rpc_url,
         )
 
-    def _load_prompts(self) -> None:
-        prompt_path = pathlib.Path(__file__).parent / "prompts" / "prompts.yaml"
-        prompt_manager = PromptManager(file_path=prompt_path)
-
-        self.list_capabilities_description = self._load_prompt_with_default(
-            prompt_manager,
-            "tools.list_capabilities",
+    def _load_tool_descriptions(self) -> None:
+        self.list_capabilities_description = self._tool_description_with_default(
+            "list_capabilities",
             "List available workflow and execution-pattern capabilities.",
         )
-        self.read_capability_description = self._load_prompt_with_default(
-            prompt_manager,
-            "tools.read_capability",
+        self.read_capability_description = self._tool_description_with_default(
+            "read_capability",
             "Read the full capability document by id.",
         )
-        self.run_workflow_cli_description = self._load_prompt_with_default(
-            prompt_manager,
-            "tools.run_workflow_cli",
+        self.run_workflow_cli_description = self._tool_description_with_default(
+            "run_workflow_cli",
             "Run a prebuilt workflow using CLI-style flags.",
         )
-        self.run_custom_workflow_code_description = self._load_prompt_with_default(
-            prompt_manager,
-            "tools.run_custom_workflow_code",
+        self.run_custom_workflow_code_description = self._tool_description_with_default(
+            "run_custom_workflow_code",
             "Run custom workflow code in an isolated subprocess with safety checks.",
         )
-        self.list_capabilities_discovery_policy = self._load_prompt_with_default(
-            prompt_manager,
-            "guides.list_capabilities_discovery_policy",
-            "",
-        )
 
-    @staticmethod
-    def _load_prompt_with_default(prompt_manager: PromptManager, key: str, default: str) -> str:
+    def _tool_description_with_default(self, tool_id: str, default: str) -> str:
         try:
-            prompt = prompt_manager._load_prompt(key)
-            if isinstance(prompt, str) and prompt.strip():
-                return prompt
+            description = self.skill_registry.tool_description(tool_id)
+            if isinstance(description, str) and description.strip():
+                return description
         except Exception:
-            logger.warning("Prompt key missing, using fallback: %s", key)
+            logger.warning("Tool description missing from skills, using fallback: %s", tool_id)
         return default
 
     def signal_handler(self, sig: int, frame: Any = None) -> None:
@@ -112,13 +101,28 @@ class CrprMCPServer:
 
         try:
             if view == "runtime_helpers":
-                helpers = await asyncio.to_thread(self.capability_catalog.runtime_helpers)
-                return self._format_runtime_helper_list_markdown(helpers=helpers)
+                helper_cards = await asyncio.to_thread(self._runtime_helper_cards)
+                header = await asyncio.to_thread(
+                    self.skill_registry.render_view_header,
+                    "views.runtime_helpers",
+                    total=len(helper_cards),
+                )
+                return self._render_discovery_view_markdown(
+                    header_markdown=header,
+                    cards=helper_cards,
+                    empty_message="No runtime helpers available.",
+                )
 
-            hits = await asyncio.to_thread(self.capability_catalog.list_capabilities)
-            return self._format_capability_list_markdown(
-                hits=hits,
-                discovery_policy_markdown=self.list_capabilities_discovery_policy,
+            capability_cards = await asyncio.to_thread(self._capability_cards)
+            header = await asyncio.to_thread(
+                self.skill_registry.render_view_header,
+                "views.list_capabilities",
+                total=len(capability_cards),
+            )
+            return self._render_discovery_view_markdown(
+                header_markdown=header,
+                cards=capability_cards,
+                empty_message="No capabilities available.",
             )
         except Exception as exc:
             logger.error("list_capabilities failed: %s", exc)
@@ -126,31 +130,26 @@ class CrprMCPServer:
 
     async def read_capability(self, capability_id: str) -> str:
         if self._shutdown_requested:
-            return self._format_capability_doc_markdown(
-                self._error_capability_doc(capability_id, "server is shutting down")
-            )
+            return self._format_capability_error_markdown(capability_id, "server is shutting down")
 
         try:
-            capability = await asyncio.to_thread(self.capability_catalog.read, capability_id)
-            if capability is None:
-                capability = self._error_capability_doc(capability_id, f"unknown capability_id: {capability_id}")
+            capability_skill = self.skill_registry.capabilities.get(capability_id)
+            if capability_skill is None:
+                return self._format_capability_error_markdown(capability_id, f"unknown capability_id: {capability_id}")
+            capability_doc = capability_skill.read_doc
 
-            runtime_helpers: list[RuntimeHelperDoc] | None = None
-            allowed_runtime_modules: list[str] | None = None
-            if capability.id == "execution.run_custom_workflow_code" and capability.kind != "error":
-                runtime_helpers = await asyncio.to_thread(self.capability_catalog.runtime_helpers)
-                allowed_runtime_modules = get_allowed_runtime_modules()
+            if capability_id != "execution.run_custom_workflow_code":
+                return capability_doc
 
-            return self._format_capability_doc_markdown(
-                capability,
-                runtime_helpers=runtime_helpers,
-                allowed_runtime_modules=allowed_runtime_modules,
+            runtime_helper_details = await asyncio.to_thread(self._runtime_helper_details)
+            return self._append_runtime_helper_details(
+                capability_doc=capability_doc,
+                runtime_helper_details=runtime_helper_details,
+                allowed_runtime_modules=get_allowed_runtime_modules(),
             )
         except Exception as exc:
             logger.error("read_capability failed: %s", exc)
-            return self._format_capability_doc_markdown(
-                self._error_capability_doc(capability_id, f"runner internal exception: {exc}")
-            )
+            return self._format_capability_error_markdown(capability_id, f"runner internal exception: {exc}")
 
     async def run_workflow_cli(
         self,
@@ -228,15 +227,16 @@ class CrprMCPServer:
             )
 
     @staticmethod
-    def _error_capability_doc(capability_id: str, message: str) -> CapabilityDoc:
-        return CapabilityDoc(
-            id=capability_id,
-            kind="error",
-            description=message,
-            arg_schema={},
-            examples=[],
-            constraints=[],
-            expected_output_shape={"error": "string"},
+    def _format_capability_error_markdown(capability_id: str, message: str) -> str:
+        return "\n".join(
+            [
+                f"## Capability: `{capability_id}`",
+                "",
+                "- Kind: `error`",
+                "",
+                "### Description",
+                message,
+            ]
         )
 
     @staticmethod
@@ -256,418 +256,90 @@ class CrprMCPServer:
         )
 
     @staticmethod
-    def _format_capability_list_markdown(
-        hits: list[CapabilityHit],
-        discovery_policy_markdown: str = "",
-    ) -> str:
-        lines = ["## Capability List", "", f"- Total: `{len(hits)}`", ""]
-        lines.extend(CrprMCPServer._capability_kind_legend())
-        policy_lines = CrprMCPServer._markdown_block_lines(discovery_policy_markdown)
-        if policy_lines:
-            lines.extend(["", *policy_lines, ""])
-        if not hits:
-            lines.append("No capabilities available.")
-            return "\n".join(lines)
-
-        for index, hit in enumerate(hits, start=1):
-            lines.extend(
-                [
-                    f"### {index}. `{hit.id}`",
-                    f"- Kind: `{hit.kind}`",
-                    f"- Summary: {hit.summary}",
-                    f"- When to use: {hit.when_to_use}",
-                ]
-            )
-            if hit.id == "file_context_reader":
-                lines.append(
-                    "- Scope warning: never use this for source PR repository files; use `pr_file_context_reader`."
-                )
-            elif hit.id == "pr_file_context_reader":
-                lines.append("- Scope note: use this for source PR file reads at `head`/`base` refs.")
-            lines.extend(
-                [
-                    f"- Next step: `read_capability(capability_id=\"{hit.id}\")`",
-                    "- Interface details intentionally omitted here; use `read_capability`.",
-                    "",
-                ]
-            )
-        return "\n".join(lines).rstrip()
-
-    @staticmethod
     def _markdown_block_lines(markdown: str) -> list[str]:
         normalized = str(markdown).strip()
         if not normalized:
             return []
         return [line.rstrip() for line in normalized.splitlines()]
 
-    @staticmethod
-    def _format_runtime_helper_list_markdown(
-        helpers: list[RuntimeHelperDoc],
-        *,
-        include_header: bool = True,
-        include_policy: bool = True,
-        detailed: bool = False,
-        empty_message: str = "No runtime helpers available.",
-    ) -> str:
-        lines: list[str] = []
-        if include_header:
-            lines.extend(["## Runtime Helper List", "", f"- Total: `{len(helpers)}`", ""])
+    def _capability_cards(self) -> list[tuple[str, str]]:
+        skills = sorted(self.skill_registry.capabilities.values(), key=lambda skill: (skill.order, skill.id))
+        return [(skill.id, skill.list_card) for skill in skills]
 
-        if include_policy:
-            lines.extend(
-                [
-                    "### Discovery Policy",
-                    "- This list is intentionally brief.",
-                    "- For full helper schemas/examples, call `read_capability(capability_id=\"execution.run_custom_workflow_code\")`.",
-                    "- Before custom-code execution, always read that capability document.",
-                    "",
-                ]
-            )
+    def _runtime_helper_cards(self) -> list[tuple[str, str]]:
+        helpers = sorted(self.skill_registry.runtime_helpers.values(), key=lambda helper: (helper.order, helper.id))
+        return [(helper.id, helper.list_card) for helper in helpers]
 
-        if not helpers:
-            lines.append(empty_message)
-            return "\n".join(lines).rstrip()
+    def _runtime_helper_details(self) -> list[tuple[str, str]]:
+        helpers = sorted(self.skill_registry.runtime_helpers.values(), key=lambda helper: (helper.order, helper.id))
+        return [(helper.id, helper.detail_doc) for helper in helpers]
 
-        for index, helper in enumerate(helpers, start=1):
-            if not detailed:
-                lines.extend(
-                    [
-                        f"### {index}. `{helper.id}`",
-                        f"- Summary: {helper.summary or '(none)'}",
-                        "- Details: use `read_capability(capability_id=\"execution.run_custom_workflow_code\")`",
-                        "",
-                    ]
+    def _validate_view_placeholders(self) -> None:
+        required_view_ids = ("views.list_capabilities", "views.runtime_helpers")
+        for view_id in required_view_ids:
+            header = self.skill_registry.render_view_header(view_id, total=0)
+            placeholder_count = header.count(self._DISCOVERY_ITEMS_PLACEHOLDER)
+            if placeholder_count != 1:
+                raise ValueError(
+                    f"view `{view_id}` must include `{self._DISCOVERY_ITEMS_PLACEHOLDER}` exactly once; "
+                    f"found {placeholder_count}"
                 )
-                continue
 
-            signature = CrprMCPServer._runtime_helper_signature(helper)
-            parameters = CrprMCPServer._runtime_helper_parameter_lines(helper)
-            examples = CrprMCPServer._runtime_helper_example_calls(helper)
-            lines.extend(
-                [
-                    f"#### `{helper.id}`",
-                    f"- Summary: {helper.summary or '(none)'}",
-                    "- Signature:",
-                    "```python",
-                    signature,
-                    "```",
-                    "- Parameters:",
-                ]
-            )
-            if parameters:
-                lines.extend(parameters)
-            else:
-                lines.append("- (none)")
+    @staticmethod
+    def _numbered_cards_block_markdown(
+        cards: list[tuple[str, str]],
+        empty_message: str,
+    ) -> str:
+        if not cards:
+            return empty_message
 
-            if examples:
-                lines.extend(["- Examples:", "```python", *examples, "```", ""])
-            else:
-                lines.extend(["- Examples: (none)", ""])
+        lines: list[str] = []
+        for index, (doc_id, card_markdown) in enumerate(cards, start=1):
+            lines.append(f"### {index}. `{doc_id}`")
+            lines.extend(CrprMCPServer._markdown_block_lines(card_markdown))
+            if index < len(cards):
+                lines.append("")
 
         return "\n".join(lines).rstrip()
 
-    @staticmethod
-    def _format_capability_doc_markdown(
-        capability: CapabilityDoc,
-        runtime_helpers: list[RuntimeHelperDoc] | None = None,
-        allowed_runtime_modules: list[str] | None = None,
+    def _render_discovery_view_markdown(
+        self,
+        header_markdown: str,
+        cards: list[tuple[str, str]],
+        empty_message: str,
     ) -> str:
-        lines = [f"## Capability: `{capability.id}`", "", f"- Kind: `{capability.kind}`", ""]
-        lines.extend(CrprMCPServer._capability_kind_legend())
-        lines.append("")
-        if capability.description:
-            lines.extend(["### Description", capability.description, ""])
-
-        if capability.kind == "workflow":
-            lines.extend(
-                [
-                    "### Arg Usage",
-                    f"`{CrprMCPServer._workflow_arg_usage(capability.id, capability.arg_schema)}`",
-                    "",
-                ]
+        placeholder_count = header_markdown.count(self._DISCOVERY_ITEMS_PLACEHOLDER)
+        if placeholder_count != 1:
+            raise ValueError(
+                f"view header must include `{self._DISCOVERY_ITEMS_PLACEHOLDER}` exactly once; found {placeholder_count}"
             )
 
-        lines.extend(
-            [
-                "### Arguments",
-            ]
-        )
-        argument_rows = CrprMCPServer._capability_argument_table_lines(capability)
-        if argument_rows:
-            lines.extend(argument_rows)
+        cards_block = self._numbered_cards_block_markdown(cards=cards, empty_message=empty_message)
+        rendered = header_markdown.replace(self._DISCOVERY_ITEMS_PLACEHOLDER, cards_block)
+        return "\n".join(self._markdown_block_lines(rendered)).rstrip()
+
+    @staticmethod
+    def _append_runtime_helper_details(
+        capability_doc: str,
+        runtime_helper_details: list[tuple[str, str]],
+        allowed_runtime_modules: list[str],
+    ) -> str:
+        lines = CrprMCPServer._markdown_block_lines(capability_doc)
+        lines.extend(["", "### Runtime Helpers", "Allowed runtime modules:"])
+
+        if allowed_runtime_modules:
+            lines.extend([f"- `{module}`" for module in allowed_runtime_modules])
         else:
             lines.append("- (none)")
 
-        lines.extend(
-            [
-                "### Examples",
-            ]
-        )
-        cli_examples = CrprMCPServer._capability_cli_examples(capability)
-        if cli_examples:
-            lines.extend(cli_examples)
-        else:
-            lines.append("- (none)")
+        if not runtime_helper_details:
+            lines.extend(["", "No runtime helpers registered."])
+            return "\n".join(lines).rstrip()
 
-        lines.extend(
-            [
-                "### Constraints",
-            ]
-        )
-        if capability.constraints:
-            lines.extend([f"- {constraint}" for constraint in capability.constraints])
-        else:
-            lines.append("- (none)")
+        for _, detail_markdown in runtime_helper_details:
+            lines.extend(["", *CrprMCPServer._markdown_block_lines(detail_markdown)])
 
-        lines.extend(
-            [
-                "",
-                "### Expected Output Summary",
-            ]
-        )
-        output_summary_lines = CrprMCPServer._expected_output_summary_lines(capability.expected_output_shape)
-        if output_summary_lines:
-            lines.extend(output_summary_lines)
-        else:
-            lines.extend(["Returns a JSON object.", "- (no documented fields)"])
-
-        if runtime_helpers is not None:
-            lines.extend(["", "### Runtime Helpers"])
-            modules = allowed_runtime_modules or []
-            lines.append("Allowed runtime modules:")
-            if modules:
-                lines.extend([f"- `{module}`" for module in modules])
-            else:
-                lines.append("- (none)")
-            runtime_helper_markdown = CrprMCPServer._format_runtime_helper_list_markdown(
-                runtime_helpers,
-                include_header=False,
-                include_policy=False,
-                detailed=True,
-                empty_message="No runtime helpers registered.",
-            )
-            lines.extend(["", *runtime_helper_markdown.splitlines()])
-        return "\n".join(lines)
-
-    @staticmethod
-    def _workflow_arg_usage(workflow_id: str, arg_schema: dict[str, Any]) -> str:
-        parts: list[str] = []
-        for arg_name, schema in arg_schema.items():
-            if not isinstance(arg_name, str):
-                continue
-            schema_dict = schema if isinstance(schema, dict) else {}
-            flag = f"--{arg_name.replace('_', '-')}"
-            value_type = str(schema_dict.get("type", "value")).strip().lower() or "value"
-            value_fragment = f"<{value_type}>"
-            if schema_dict.get("required"):
-                parts.append(f"{flag} {value_fragment}")
-            else:
-                parts.append(f"[{flag} {value_fragment}]")
-        suffix = f" {' '.join(parts)}" if parts else ""
-        return f"{workflow_id}{suffix}"
-
-    @staticmethod
-    def _capability_argument_table_lines(capability: CapabilityDoc) -> list[str]:
-        if not capability.arg_schema:
-            return []
-
-        lines = [
-            "| Name | Type | Required | Default | Description |",
-            "| :--- | :--- | :--- | :--- | :--- |",
-        ]
-
-        for arg_name, schema in capability.arg_schema.items():
-            if not isinstance(arg_name, str):
-                continue
-            schema_dict = schema if isinstance(schema, dict) else {}
-            arg_type = str(schema_dict.get("type", "any")).strip() or "any"
-            required = "Yes" if schema_dict.get("required") else "No"
-            default = "N/A"
-            if "default" in schema_dict:
-                default = f"`{CrprMCPServer._python_literal(schema_dict.get('default'))}`"
-            description = str(schema_dict.get("description", "")).strip() or "N/A"
-            display_name = arg_name
-            if capability.kind == "workflow":
-                display_name = f"--{arg_name.replace('_', '-')}"
-
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        f"`{CrprMCPServer._markdown_cell(display_name)}`",
-                        f"`{CrprMCPServer._markdown_cell(arg_type)}`",
-                        required,
-                        default,
-                        CrprMCPServer._markdown_cell(description),
-                    ]
-                )
-                + " |"
-            )
-        return lines
-
-    @staticmethod
-    def _capability_cli_examples(capability: CapabilityDoc) -> list[str]:
-        lines: list[str] = []
-        for index, example in enumerate(capability.examples, start=1):
-            if not isinstance(example, dict):
-                continue
-            command = CrprMCPServer._example_to_cli_command(example)
-            if not command:
-                continue
-            lines.append(f"{index}. `{command}`")
-        return lines
-
-    @staticmethod
-    def _example_to_cli_command(example: dict[str, Any]) -> str:
-        call_name = example.get("call")
-        if not isinstance(call_name, str) or not call_name.strip():
-            return ""
-
-        args = example.get("args")
-        if not isinstance(args, dict) or not args:
-            return call_name.strip()
-
-        parts = [call_name.strip()]
-        for key, value in args.items():
-            flag = f"--{str(key).replace('_', '-')}"
-            parts.append(f"{flag} {CrprMCPServer._cli_value(value)}")
-        return " ".join(parts)
-
-    @staticmethod
-    def _cli_value(value: Any) -> str:
-        if isinstance(value, str):
-            escaped = value.replace('"', '\\"')
-            return f'"{escaped}"'
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        return str(value)
-
-    @staticmethod
-    def _expected_output_summary_lines(expected_output_shape: dict[str, Any]) -> list[str]:
-        if not expected_output_shape:
-            return []
-
-        lines = ["Returns a JSON object with:"]
-        for field_name, field_shape in expected_output_shape.items():
-            if not isinstance(field_name, str):
-                continue
-            type_label = CrprMCPServer._shape_type_label(field_shape)
-            lines.append(f"- `{field_name}`: {CrprMCPServer._output_field_summary(field_name, type_label)}")
-        return lines
-
-    @staticmethod
-    def _shape_type_label(shape: Any) -> str:
-        if isinstance(shape, str):
-            return shape
-        if isinstance(shape, dict):
-            return "object"
-        if isinstance(shape, list):
-            return "list"
-        return "any"
-
-    @staticmethod
-    def _output_field_summary(field_name: str, type_label: str) -> str:
-        lower_name = field_name.strip().lower()
-        if lower_name == "summary":
-            return "High-level summary details."
-        if lower_name == "files":
-            return "List of file entries touched by the workflow."
-        if lower_name in {"owner", "repo", "pr_number", "pr-number"}:
-            return f"Echoed input identifier (type `{type_label}`)."
-        if lower_name in {"success", "exit_code", "result_json", "safety_rejections"}:
-            return f"Execution result field (type `{type_label}`)."
-        return f"Field with type `{type_label}`."
-
-    @staticmethod
-    def _markdown_cell(text: str) -> str:
-        return text.replace("|", "\\|")
-
-    @staticmethod
-    def _runtime_helper_signature(helper: RuntimeHelperDoc) -> str:
-        call_name = helper.id
-        if helper.examples:
-            first_example = helper.examples[0]
-            if isinstance(first_example, dict):
-                example_call = first_example.get("call")
-                if isinstance(example_call, str) and example_call.strip():
-                    call_name = example_call.strip()
-
-        params: list[str] = []
-        for arg_name, arg_schema in helper.arg_schema.items():
-            schema = arg_schema if isinstance(arg_schema, dict) else {}
-            arg_type = CrprMCPServer._schema_type_to_python(schema.get("type"))
-            if schema.get("required"):
-                params.append(f"{arg_name}: {arg_type}")
-                continue
-            if "default" in schema:
-                params.append(f"{arg_name}: {arg_type} = {CrprMCPServer._python_literal(schema.get('default'))}")
-                continue
-            params.append(f"{arg_name}: {arg_type} | None = None")
-
-        return f"{call_name}({', '.join(params)}) -> Any"
-
-    @staticmethod
-    def _runtime_helper_parameter_lines(helper: RuntimeHelperDoc) -> list[str]:
-        lines: list[str] = []
-        for arg_name, arg_schema in helper.arg_schema.items():
-            schema = arg_schema if isinstance(arg_schema, dict) else {}
-            arg_type = CrprMCPServer._schema_type_to_python(schema.get("type"))
-            required_text = "required" if schema.get("required") else "optional"
-            description = str(schema.get("description", "")).strip()
-            default = schema.get("default")
-
-            detail_parts = [f"`{arg_name}` (`{arg_type}`, {required_text})"]
-            if "default" in schema:
-                detail_parts.append(f"default `{CrprMCPServer._python_literal(default)}`")
-            if description:
-                detail_parts.append(description)
-            lines.append(f"- {'; '.join(detail_parts)}")
-        return lines
-
-    @staticmethod
-    def _runtime_helper_example_calls(helper: RuntimeHelperDoc) -> list[str]:
-        calls: list[str] = []
-        for example in helper.examples:
-            if not isinstance(example, dict):
-                continue
-            call_name = example.get("call")
-            if not isinstance(call_name, str) or not call_name.strip():
-                continue
-            args = example.get("args")
-            if not isinstance(args, dict) or not args:
-                calls.append(f"{call_name.strip()}()")
-                continue
-
-            call_args = ", ".join(f"{key}={CrprMCPServer._python_literal(value)}" for key, value in args.items())
-            calls.append(f"{call_name.strip()}({call_args})")
-        return calls
-
-    @staticmethod
-    def _schema_type_to_python(schema_type: Any) -> str:
-        mapping = {
-            "string": "str",
-            "integer": "int",
-            "number": "float",
-            "boolean": "bool",
-            "object": "dict[str, Any]",
-            "array": "list[Any]",
-        }
-        key = str(schema_type or "").strip().lower()
-        return mapping.get(key, "Any")
-
-    @staticmethod
-    def _python_literal(value: Any) -> str:
-        if isinstance(value, str):
-            return repr(value)
-        return repr(value)
-
-    @staticmethod
-    def _capability_kind_legend() -> list[str]:
-        return [
-            "### Capability Types",
-            "- `workflow`: prebuilt analysis flows invoked with `run_workflow_cli`.",
-            "- `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).",
-        ]
+        return "\n".join(lines).rstrip()
 
     @staticmethod
     def _format_execution_result_markdown(title: str, result: ExecutionResult) -> str:
@@ -761,15 +433,15 @@ class CrprMCPServer:
         @self.server.custom_route("/ready", methods=["GET"])
         async def readiness_check(request: Request) -> Response:
             try:
-                if not hasattr(self, "capability_catalog") or self.capability_catalog is None:
-                    return JSONResponse({"status": "not_ready", "reason": "capability_catalog_unavailable"}, status_code=503)
+                if not hasattr(self, "skill_registry") or self.skill_registry is None:
+                    return JSONResponse({"status": "not_ready", "reason": "skill_registry_unavailable"}, status_code=503)
 
                 if not hasattr(self, "execution_runner") or self.execution_runner is None:
                     return JSONResponse({"status": "not_ready", "reason": "execution_runner_unavailable"}, status_code=503)
 
-                if not self.manifest_path.exists():
+                if not self.skills_root.exists():
                     return JSONResponse(
-                        {"status": "not_ready", "reason": f"manifest_missing:{self.manifest_path}"},
+                        {"status": "not_ready", "reason": f"skills_root_missing:{self.skills_root}"},
                         status_code=503,
                     )
 

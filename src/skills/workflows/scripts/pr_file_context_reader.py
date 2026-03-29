@@ -3,10 +3,26 @@ import asyncio
 import json
 from collections.abc import Mapping
 
+from pydantic import BaseModel, Field
+
 from runtime import github_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
 MAX_LINE_WINDOW = 60
+
+
+class OutputModel(BaseModel):
+    owner: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    pr_number: int = Field(..., json_schema_extra={"summary_role": "echoed_input"})
+    path: str
+    start_line: int
+    end_line: int
+    content: str
+    ref_side: str
+    ref_name: str
+    ref_sha: str
+    evidence_origin: str
 
 
 def parse_args(argv=None):
@@ -105,6 +121,7 @@ async def main():
             "ref_sha": ref_sha,
             "evidence_origin": f"github_pr_{ref_side}",
         }
+        OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))
         return 0
     except Exception as exc:
