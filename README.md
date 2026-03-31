@@ -96,8 +96,7 @@ Optional:
 
 - `MCP_SSE_PORT` (default `8000`)
 - `MCP_STREAMABLE_HTTP_PORT` (default `8080`)
-- `EXECUTION_TIMEOUT_DEFAULT` (default `30`)
-- `EXECUTION_TIMEOUT_MAX` (default `120`)
+- `EXECUTION_TIMEOUT_SECONDS` (default `300`)
 - `EXECUTION_STDOUT_MAX_BYTES` (default `32768`)
 - `EXECUTION_STDERR_MAX_BYTES` (default `32768`)
 
