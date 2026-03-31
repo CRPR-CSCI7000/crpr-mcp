@@ -2,6 +2,7 @@ import os
 from typing import Any
 
 import requests
+from runtime.tracking import record_runtime_call
 
 REQUEST_TIMEOUT_SECONDS = 15
 _RPC_URL_ENV = "CRPR_GITHUB_RPC_URL"
@@ -96,14 +97,32 @@ def _get_runtime() -> GitHubRuntime:
 
 
 def get_pull_request(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    record_runtime_call(
+        system="github",
+        operation="get_pull_request",
+        is_query=True,
+        metadata={"owner": owner, "repo": repo, "pr_number": int(pr_number)},
+    )
     return _get_runtime().get_pull_request(owner=owner, repo=repo, pr_number=pr_number)
 
 
 def list_pull_request_files(owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
+    record_runtime_call(
+        system="github",
+        operation="list_pull_request_files",
+        is_query=True,
+        metadata={"owner": owner, "repo": repo, "pr_number": int(pr_number)},
+    )
     return _get_runtime().list_pull_request_files(owner=owner, repo=repo, pr_number=pr_number)
 
 
 def get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -> str:
+    record_runtime_call(
+        system="github",
+        operation="get_file_content",
+        is_query=True,
+        metadata={"owner": owner, "repo": repo, "path": path, "ref": ref},
+    )
     return _get_runtime().get_file_content(owner=owner, repo=repo, path=path, ref=ref)
 
 
