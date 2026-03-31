@@ -20,8 +20,15 @@ def test_runtime_client_calls_parent_rpc_for_pull_request() -> None:
     runtime = GitHubRuntime(rpc_url="http://127.0.0.1:9090/internal/github-rpc")
     rpc_ok = _response(200, {"ok": True, "result": {"number": 7, "title": "ok"}})
 
-    with patch("runtime.github_tools.requests.post", return_value=rpc_ok) as post_mock:
-        pr = runtime.get_pull_request("acme", "checkout", 7)
+    with (
+        patch("runtime.github_tools.requests.post", return_value=rpc_ok) as post_mock,
+        patch.dict(
+            "os.environ",
+            {"CRPR_CONTEXT_OWNER": "acme", "CRPR_CONTEXT_REPO": "checkout", "CRPR_CONTEXT_PR_NUMBER": "7"},
+            clear=False,
+        ),
+    ):
+        pr = runtime.get_pull_request()
 
     assert pr["number"] == 7
     call_kwargs = post_mock.call_args.kwargs
@@ -36,15 +43,39 @@ def test_runtime_client_raises_when_parent_rpc_returns_error() -> None:
     rpc_error = _response(400, {"ok": False, "error": "unauthorized"})
     rpc_error.text = '{"ok": false, "error": "unauthorized"}'
 
-    with patch("runtime.github_tools.requests.post", return_value=rpc_error):
+    with (
+        patch("runtime.github_tools.requests.post", return_value=rpc_error),
+        patch.dict(
+            "os.environ",
+            {"CRPR_CONTEXT_OWNER": "acme", "CRPR_CONTEXT_REPO": "checkout", "CRPR_CONTEXT_PR_NUMBER": "1"},
+            clear=False,
+        ),
+    ):
         with pytest.raises(GitHubRuntimeError, match="unauthorized"):
-            runtime.get_pull_request("acme", "checkout", 1)
+            runtime.get_pull_request()
 
 
 def test_runtime_client_requires_proxy_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CRPR_GITHUB_RPC_URL", raising=False)
     with pytest.raises(GitHubRuntimeError, match="parent RPC is not configured"):
         GitHubRuntime(rpc_url="")
+
+
+def test_runtime_client_uses_context_env_when_identity_args_omitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CRPR_CONTEXT_OWNER", "acme")
+    monkeypatch.setenv("CRPR_CONTEXT_REPO", "checkout")
+    monkeypatch.setenv("CRPR_CONTEXT_PR_NUMBER", "7")
+    runtime = GitHubRuntime(rpc_url="http://127.0.0.1:9090/internal/github-rpc")
+    rpc_ok = _response(200, {"ok": True, "result": {"number": 7, "title": "ok"}})
+
+    with patch("runtime.github_tools.requests.post", return_value=rpc_ok) as post_mock:
+        pr = runtime.get_pull_request()
+
+    assert pr["number"] == 7
+    call_kwargs = post_mock.call_args.kwargs
+    assert call_kwargs["json"]["params"]["owner"] == "acme"
+    assert call_kwargs["json"]["params"]["repo"] == "checkout"
+    assert call_kwargs["json"]["params"]["pr_number"] == 7
 
 
 def test_parent_runtime_list_pull_request_files_paginates_until_exhausted() -> None:

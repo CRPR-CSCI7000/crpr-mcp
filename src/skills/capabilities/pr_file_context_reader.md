@@ -55,8 +55,8 @@ This avoids branch/index ambiguity when evaluating source PR changes.
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side head"`
-2. `run_workflow_cli --command "pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side base"`
+1. `pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side head`
+2. `pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side base`
 ### Constraints
 - Uses GitHub PR metadata and repository contents API.
 - Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines.

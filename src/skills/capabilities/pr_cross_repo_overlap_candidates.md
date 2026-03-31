@@ -52,8 +52,8 @@ By default, all indexed repositories are scanned and the canonical source repo i
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_cross_repo_overlap_candidates"`
-2. `run_workflow_cli --command "pr_cross_repo_overlap_candidates --include-source-repo true"`
+1. `pr_cross_repo_overlap_candidates`
+2. `pr_cross_repo_overlap_candidates --include-source-repo true`
 ### Constraints
 - Defaults to all indexed repositories.
 - Canonical source repo is excluded by default unless `include_source_repo=true`.

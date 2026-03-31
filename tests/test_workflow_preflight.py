@@ -9,6 +9,7 @@ from src.server import CrprMCPServer
 
 def _build_server(monkeypatch, tmp_path: Path) -> CrprMCPServer:
     monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
+    monkeypatch.setenv("EXECUTION_TIMEOUT_SECONDS", "60")
     return CrprMCPServer(ServerConfig())
 
 
@@ -19,7 +20,15 @@ def test_run_workflow_cli_preflight_ensures_context_before_subprocess(monkeypatc
     monkeypatch.setattr(
         server.execution_runner,
         "parse_workflow_cli_command",
-        lambda command: ("pr_impact_assessment", {"owner": "acme", "repo": "checkout", "pr_number": 12}),
+        lambda command: ("pr_impact_assessment", {}),
+    )
+    monkeypatch.setattr(
+        "src.server.get_http_headers",
+        lambda include_all=True: {  # noqa: ARG005
+            "x-crpr-thread-owner": "acme",
+            "x-crpr-thread-repo": "checkout",
+            "x-crpr-thread-pr-number": "12",
+        },
     )
 
     async def fake_ensure(owner: str, repo: str, pr_number: int, wait: bool = True) -> ResolvedContext:
@@ -47,16 +56,17 @@ def test_run_workflow_cli_preflight_ensures_context_before_subprocess(monkeypatc
     ) -> ExecutionResult:
         call_order.append("run")
         assert workflow_id == "pr_impact_assessment"
-        assert args["owner"] == "acme"
+        assert args == {}
+        assert timeout_seconds == 60
         assert extra_env is not None
         assert extra_env["CRPR_CONTEXT_ID"] == "ctx_123"
-        assert enforce_timeout is False
+        assert enforce_timeout is True
         return ExecutionResult(success=True, exit_code=0, result_json={"ok": True})
 
     monkeypatch.setattr(server.context_lifecycle, "ensure_pr_context", fake_ensure)
     monkeypatch.setattr(server.execution_runner, "run_workflow_script", fake_run)
 
-    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment", timeout_seconds=30))
+    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment"))
 
     assert call_order == ["ensure", "run"]
     assert "Process status: `success`" in markdown
@@ -72,6 +82,7 @@ def test_run_workflow_cli_fails_fast_when_pr_identity_missing_from_normalized_pa
         "parse_workflow_cli_command",
         lambda command: ("pr_impact_assessment", {"limit": 10}),
     )
+    monkeypatch.setattr("src.server.get_http_headers", lambda include_all=True: {})  # noqa: ARG005
 
     called = {"run": False}
 
@@ -81,7 +92,7 @@ def test_run_workflow_cli_fails_fast_when_pr_identity_missing_from_normalized_pa
 
     monkeypatch.setattr(server.execution_runner, "run_workflow_script", fake_run)
 
-    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment", timeout_seconds=30))
+    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment"))
 
     assert called["run"] is False
     assert "workflow preflight failed" in markdown
@@ -95,7 +106,15 @@ def test_run_workflow_cli_returns_preflight_error_when_context_build_fails(
     monkeypatch.setattr(
         server.execution_runner,
         "parse_workflow_cli_command",
-        lambda command: ("pr_impact_assessment", {"owner": "acme", "repo": "checkout", "pr_number": 12}),
+        lambda command: ("pr_impact_assessment", {}),
+    )
+    monkeypatch.setattr(
+        "src.server.get_http_headers",
+        lambda include_all=True: {  # noqa: ARG005
+            "x-crpr-thread-owner": "acme",
+            "x-crpr-thread-repo": "checkout",
+            "x-crpr-thread-pr-number": "12",
+        },
     )
 
     async def fake_ensure(owner: str, repo: str, pr_number: int, wait: bool = True) -> ResolvedContext:
@@ -110,7 +129,7 @@ def test_run_workflow_cli_returns_preflight_error_when_context_build_fails(
     monkeypatch.setattr(server.context_lifecycle, "ensure_pr_context", fake_ensure)
     monkeypatch.setattr(server.execution_runner, "run_workflow_script", fake_run)
 
-    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment", timeout_seconds=30))
+    markdown = asyncio.run(server.run_workflow_cli(command="pr_impact_assessment"))
 
     assert called["run"] is False
     assert "workflow preflight failed: catalog build failed" in markdown
@@ -119,7 +138,14 @@ def test_run_workflow_cli_returns_preflight_error_when_context_build_fails(
 def test_run_custom_workflow_code_does_not_use_context_lifecycle(monkeypatch, tmp_path: Path) -> None:
     server = _build_server(monkeypatch, tmp_path)
 
-    async def fake_run_custom(code: str, timeout_seconds: int) -> ExecutionResult:
+    async def fake_run_custom(
+        code: str,
+        timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        assert timeout_seconds == 60
+        assert extra_env is None
         return ExecutionResult(success=True, exit_code=0, result_json={"ok": True})
 
     async def fail_ensure(*args, **kwargs):
@@ -128,6 +154,39 @@ def test_run_custom_workflow_code_does_not_use_context_lifecycle(monkeypatch, tm
     monkeypatch.setattr(server.execution_runner, "run_custom_workflow_code", fake_run_custom)
     monkeypatch.setattr(server.context_lifecycle, "ensure_pr_context", fail_ensure)
 
-    markdown = asyncio.run(server.run_custom_workflow_code(code="print('ok')", timeout_seconds=30))
+    markdown = asyncio.run(server.run_custom_workflow_code(code="print('ok')"))
+
+    assert "Process status: `success`" in markdown
+
+
+def test_run_custom_workflow_code_injects_thread_scope_env_from_headers(
+    monkeypatch, tmp_path: Path
+) -> None:
+    server = _build_server(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "src.server.get_http_headers",
+        lambda include_all=True: {  # noqa: ARG005
+            "x-crpr-thread-owner": "acme",
+            "x-crpr-thread-repo": "checkout",
+            "x-crpr-thread-pr-number": "12",
+        },
+    )
+
+    async def fake_run_custom(
+        code: str,
+        timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        assert timeout_seconds == 60
+        assert extra_env is not None
+        assert extra_env["CRPR_CONTEXT_OWNER"] == "acme"
+        assert extra_env["CRPR_CONTEXT_REPO"] == "checkout"
+        assert extra_env["CRPR_CONTEXT_PR_NUMBER"] == "12"
+        return ExecutionResult(success=True, exit_code=0, result_json={"ok": True})
+
+    monkeypatch.setattr(server.execution_runner, "run_custom_workflow_code", fake_run_custom)
+
+    markdown = asyncio.run(server.run_custom_workflow_code(code="print('ok')"))
 
     assert "Process status: `success`" in markdown

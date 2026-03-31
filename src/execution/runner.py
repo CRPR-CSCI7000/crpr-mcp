@@ -6,7 +6,6 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -25,24 +24,6 @@ _ENV_ALLOWLIST = {
     "TZ",
     "ZOEKT_API_URL",
 }
-_WORKFLOW_CONTEXT_IDENTITY_KEYS: dict[str, tuple[str, str, str]] = {
-    "pr_impact_assessment": ("owner", "repo", "pr_number"),
-    "pr_cross_repo_overlap_candidates": ("owner", "repo", "pr_number"),
-    "pr_file_context_reader": ("owner", "repo", "pr_number"),
-    "file_context_reader": ("source_owner", "source_repo", "source_pr_number"),
-    "validate_contract_alignment": (
-        "provider_owner",
-        "provider_repo",
-        "provider_pr_number",
-    ),
-}
-_THREAD_CONTEXT_IDENTITY_KEYS: tuple[str, str, str] = (
-    "thread_owner",
-    "thread_repo",
-    "thread_pr_number",
-)
-
-
 class ExecutionRunner:
     def __init__(
         self,
@@ -103,8 +84,7 @@ class ExecutionRunner:
             arg_schema = {}
 
         usage = self._workflow_usage(workflow_id, arg_schema)
-        internal_arg_schema = self._workflow_internal_arg_schema(workflow_id)
-        flag_aliases = self._workflow_flag_aliases(arg_schema, internal_arg_schema.keys())
+        flag_aliases = self._workflow_flag_aliases(arg_schema)
         parsed_args: dict[str, Any] = {}
 
         index = 1
@@ -130,7 +110,7 @@ class ExecutionRunner:
 
             schema = arg_schema.get(arg_name)
             if not isinstance(schema, dict):
-                schema = internal_arg_schema.get(arg_name, {"type": "string"})
+                schema = {"type": "string"}
             parsed_args[arg_name] = self._coerce_cli_arg_value(arg_name, value_token, schema, usage)
             index += 2
 
@@ -273,6 +253,8 @@ class ExecutionRunner:
         self,
         code: str,
         timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         rejections = validate_custom_workflow_code(code)
         if rejections:
@@ -301,7 +283,7 @@ class ExecutionRunner:
                     timeout_seconds=timeout_seconds,
                     require_result_marker=False,
                     allow_plain_stdout_result=True,
-                    extra_env=None,
+                    extra_env=extra_env,
                     enforce_timeout=True,
                 )
             finally:
@@ -401,40 +383,11 @@ class ExecutionRunner:
         return None
 
     @staticmethod
-    def _workflow_internal_arg_schema(workflow_id: str) -> dict[str, dict[str, Any]]:
-        keys = _WORKFLOW_CONTEXT_IDENTITY_KEYS.get(workflow_id, tuple())
-        schema: dict[str, dict[str, Any]] = {}
-        for key in _THREAD_CONTEXT_IDENTITY_KEYS:
-            if key.endswith("_number"):
-                schema[key] = {"type": "integer", "minimum": 1}
-            else:
-                schema[key] = {"type": "string"}
-        for key in keys:
-            if key.endswith("_number"):
-                schema[key] = {
-                    "type": "integer",
-                    "minimum": 1,
-                }
-            else:
-                schema[key] = {"type": "string"}
-        return schema
-
-    @staticmethod
     def _workflow_flag_aliases(
         arg_schema: dict[str, Any],
-        extra_arg_names: Iterable[str] | None = None,
     ) -> dict[str, str]:
         aliases: dict[str, str] = {}
-        all_arg_names: list[str] = [
-            arg_name for arg_name in arg_schema.keys() if isinstance(arg_name, str)
-        ]
-        if extra_arg_names:
-            for arg_name in extra_arg_names:
-                if not isinstance(arg_name, str):
-                    continue
-                if arg_name not in all_arg_names:
-                    all_arg_names.append(arg_name)
-        for arg_name in all_arg_names:
+        for arg_name in arg_schema.keys():
             if not isinstance(arg_name, str):
                 continue
             aliases[f"--{arg_name}"] = arg_name
@@ -526,41 +479,10 @@ class ExecutionRunner:
         return bool(str(workflow_id).strip())
 
     @staticmethod
-    def resolve_pr_identity_for_workflow(workflow_id: str, args: dict[str, Any]) -> tuple[str, str, int] | None:
-        thread_owner = str(args.get("thread_owner", "")).strip()
-        thread_repo = str(args.get("thread_repo", "")).strip()
-        try:
-            thread_pr = int(args.get("thread_pr_number"))
-        except (TypeError, ValueError):
-            thread_pr = 0
-        if thread_owner and thread_repo and thread_pr > 0:
-            return thread_owner, thread_repo, thread_pr
-
-        keys = _WORKFLOW_CONTEXT_IDENTITY_KEYS.get(workflow_id)
-        if keys is None:
-            return None
-        owner_key, repo_key, pr_key = keys
-        owner = str(args.get(owner_key, "")).strip()
-        repo = str(args.get(repo_key, "")).strip()
-        try:
-            pr_number = int(args.get(pr_key))
-        except (TypeError, ValueError):
-            return None
-        if not owner or not repo or pr_number <= 0:
-            return None
-        return owner, repo, pr_number
-
-    @staticmethod
     def _filter_internal_args_for_script(workflow_id: str, args: dict[str, Any], workflow: dict[str, Any]) -> dict[str, Any]:
-        filtered = dict(args)
-
-        for key in _THREAD_CONTEXT_IDENTITY_KEYS:
-            filtered.pop(key, None)
-
-        if workflow_id not in _WORKFLOW_CONTEXT_IDENTITY_KEYS:
-            return filtered
-
-        return filtered
+        _ = workflow_id
+        _ = workflow
+        return dict(args)
 
     @staticmethod
     def _build_isolated_command(script_path: Path, args: dict[str, Any]) -> list[str]:

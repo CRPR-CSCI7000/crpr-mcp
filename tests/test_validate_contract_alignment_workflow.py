@@ -15,8 +15,17 @@ def _load_script_module(script_name: str):
 
 
 def _set_cli_args(module, monkeypatch, payload: dict[str, object]) -> None:
+    context_env_map = {
+        "provider_owner": "CRPR_CONTEXT_OWNER",
+        "provider_repo": "CRPR_CONTEXT_REPO",
+        "provider_pr_number": "CRPR_CONTEXT_PR_NUMBER",
+    }
     argv: list[str] = []
     for key, value in payload.items():
+        env_name = context_env_map.get(key)
+        if env_name:
+            monkeypatch.setenv(env_name, str(value))
+            continue
         argv.append(f"--{key.replace('_', '-')}")
         argv.append(str(value))
     original_parse_args = module.parse_args
@@ -65,12 +74,12 @@ const submitOrder = async function(orderId, customerId) {
     monkeypatch.setattr(
         module.github_tools,
         "get_pull_request",
-        lambda owner, repo, pr_number: {"head": {"ref": "feature/orders", "sha": "abc123"}},
+        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
     )
     monkeypatch.setattr(
         module.github_tools,
         "get_file_content",
-        lambda owner, repo, path, ref: provider_content,
+        lambda path, ref: provider_content,
     )
     monkeypatch.setattr(
         module.zoekt_tools,
@@ -109,12 +118,12 @@ const submitOrder = async function(orderId, customerId) {
     monkeypatch.setattr(
         module.github_tools,
         "get_pull_request",
-        lambda owner, repo, pr_number: {"head": {"ref": "feature/orders", "sha": "abc123"}},
+        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
     )
     monkeypatch.setattr(
         module.github_tools,
         "get_file_content",
-        lambda owner, repo, path, ref: provider_content,
+        lambda path, ref: provider_content,
     )
     monkeypatch.setattr(
         module.zoekt_tools,
@@ -139,12 +148,12 @@ def test_validate_contract_alignment_returns_partial_coverage_with_warnings(monk
     monkeypatch.setattr(
         module.github_tools,
         "get_pull_request",
-        lambda owner, repo, pr_number: {"head": {"ref": "feature/orders", "sha": "abc123"}},
+        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
     )
     monkeypatch.setattr(
         module.github_tools,
         "get_file_content",
-        lambda owner, repo, path, ref: "# notes only",
+        lambda path, ref: "# notes only",
     )
     monkeypatch.setattr(
         module.zoekt_tools,

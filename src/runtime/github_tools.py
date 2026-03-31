@@ -3,6 +3,8 @@ from typing import Any
 
 import requests
 
+from .context import resolve_pr_identity, resolve_repo_identity
+
 REQUEST_TIMEOUT_SECONDS = 15
 _RPC_URL_ENV = "CRPR_GITHUB_RPC_URL"
 
@@ -23,28 +25,37 @@ class GitHubRuntime:
                 f"Set {_RPC_URL_ENV} in the subprocess environment."
             )
 
-    def get_pull_request(self, owner: str, repo: str, pr_number: int) -> dict[str, Any]:
+    def get_pull_request(self) -> dict[str, Any]:
+        resolved_owner, resolved_repo, resolved_pr_number = resolve_pr_identity()
         payload = self._call(
             "get_pull_request",
-            {"owner": owner, "repo": repo, "pr_number": int(pr_number)},
+            {"owner": resolved_owner, "repo": resolved_repo, "pr_number": resolved_pr_number},
         )
         if not isinstance(payload, dict):
             raise GitHubRuntimeError("unexpected response shape for pull request metadata")
         return payload
 
-    def list_pull_request_files(self, owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
+    def list_pull_request_files(self) -> list[dict[str, Any]]:
+        resolved_owner, resolved_repo, resolved_pr_number = resolve_pr_identity()
         payload = self._call(
             "list_pull_request_files",
-            {"owner": owner, "repo": repo, "pr_number": int(pr_number)},
+            {"owner": resolved_owner, "repo": resolved_repo, "pr_number": resolved_pr_number},
         )
         if not isinstance(payload, list):
             raise GitHubRuntimeError("unexpected response shape for pull request files")
         return [item for item in payload if isinstance(item, dict)]
 
-    def get_file_content(self, owner: str, repo: str, path: str, ref: str | None = None) -> str:
+    def get_file_content(
+        self,
+        path: str,
+        ref: str | None = None,
+    ) -> str:
+        resolved_owner, resolved_repo = resolve_repo_identity()
+        if not path:
+            raise GitHubRuntimeError("path is required")
         payload = self._call(
             "get_file_content",
-            {"owner": owner, "repo": repo, "path": path, "ref": ref},
+            {"owner": resolved_owner, "repo": resolved_repo, "path": path, "ref": ref},
         )
         if not isinstance(payload, str):
             raise GitHubRuntimeError("unexpected response shape for file content")
@@ -95,16 +106,19 @@ def _get_runtime() -> GitHubRuntime:
     return _RUNTIME
 
 
-def get_pull_request(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    return _get_runtime().get_pull_request(owner=owner, repo=repo, pr_number=pr_number)
+def get_pull_request() -> dict[str, Any]:
+    return _get_runtime().get_pull_request()
 
 
-def list_pull_request_files(owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
-    return _get_runtime().list_pull_request_files(owner=owner, repo=repo, pr_number=pr_number)
+def list_pull_request_files() -> list[dict[str, Any]]:
+    return _get_runtime().list_pull_request_files()
 
 
-def get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -> str:
-    return _get_runtime().get_file_content(owner=owner, repo=repo, path=path, ref=ref)
+def get_file_content(
+    path: str,
+    ref: str | None = None,
+) -> str:
+    return _get_runtime().get_file_content(path=path, ref=ref)
 
 
 def _extract_error_from_payload(payload: Any) -> str:

@@ -15,8 +15,17 @@ def _load_script_module(script_name: str):
 
 
 def _set_cli_args(module, monkeypatch, payload: dict[str, object]) -> None:
+    context_env_map = {
+        "owner": "CRPR_CONTEXT_OWNER",
+        "repo": "CRPR_CONTEXT_REPO",
+        "pr_number": "CRPR_CONTEXT_PR_NUMBER",
+    }
     argv: list[str] = []
     for key, value in payload.items():
+        env_name = context_env_map.get(key)
+        if env_name:
+            monkeypatch.setenv(env_name, str(value))
+            continue
         argv.append(f"--{key.replace('_', '-')}")
         if isinstance(value, bool):
             argv.append("true" if value else "false")
@@ -42,8 +51,8 @@ def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         module.github_tools,
         "get_pull_request",
-        lambda owner, repo, pr_number: {
-            "number": pr_number,
+        lambda: {
+            "number": 12,
             "title": "Harden retries",
             "state": "open",
             "draft": False,
@@ -59,7 +68,7 @@ def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         module.github_tools,
         "list_pull_request_files",
-        lambda owner, repo, pr_number: [
+        lambda: [
             {"filename": "src/retry.py", "status": "modified", "additions": 10, "deletions": 2, "changes": 12},
             {"filename": "tests/test_retry.py", "status": "added", "additions": 5, "deletions": 2, "changes": 7},
         ],
@@ -91,7 +100,7 @@ def test_pr_cross_repo_overlap_candidates_excludes_source_repo_by_default(monkey
     monkeypatch.setattr(
         module.github_tools,
         "list_pull_request_files",
-        lambda owner, repo, pr_number: [{"filename": "src/retry.py"}],
+        lambda: [{"filename": "src/retry.py"}],
     )
     monkeypatch.setattr(
         module.zoekt_tools,
@@ -132,7 +141,7 @@ def test_pr_cross_repo_overlap_candidates_include_source_repo_override(monkeypat
     monkeypatch.setattr(
         module.github_tools,
         "list_pull_request_files",
-        lambda owner, repo, pr_number: [{"filename": "src/retry.py"}],
+        lambda: [{"filename": "src/retry.py"}],
     )
     monkeypatch.setattr(
         module.zoekt_tools,
@@ -169,7 +178,7 @@ def test_pr_cross_repo_overlap_candidates_filters_generic_terms(monkeypatch, cap
     monkeypatch.setattr(
         module.github_tools,
         "list_pull_request_files",
-        lambda owner, repo, pr_number: [
+        lambda: [
             {"filename": "src/components/SettingsModal.tsx"},
             {"filename": "src/hooks/audio/useBackgroundState.ts"},
         ],
@@ -204,7 +213,7 @@ def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence_and_suggest
     monkeypatch.setattr(
         module.github_tools,
         "list_pull_request_files",
-        lambda owner, repo, pr_number: [{"filename": "api/payment_contract.proto"}],
+        lambda: [{"filename": "api/payment_contract.proto"}],
     )
     monkeypatch.setattr(module.zoekt_tools, "list_repos", lambda: ["github.com/acme/inventory"])
     monkeypatch.setattr(

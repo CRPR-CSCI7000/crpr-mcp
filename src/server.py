@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -30,6 +31,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+HEADER_THREAD_OWNER = "x-crpr-thread-owner"
+HEADER_THREAD_REPO = "x-crpr-thread-repo"
+HEADER_THREAD_PR_NUMBER = "x-crpr-thread-pr-number"
 
 class CrprMCPServer:
     _DISCOVERY_ITEMS_PLACEHOLDER = "{{DISCOVERY_ITEMS}}"
@@ -158,7 +163,6 @@ class CrprMCPServer:
     async def run_workflow_cli(
         self,
         command: str,
-        timeout_seconds: int = 30,
     ) -> str:
         if self._shutdown_requested:
             return self._format_execution_result_markdown(
@@ -169,7 +173,6 @@ class CrprMCPServer:
         try:
             request = WorkflowCliRunRequest(
                 command=command,
-                timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
             return self._format_execution_result_markdown(
@@ -182,13 +185,13 @@ class CrprMCPServer:
             extra_env: dict[str, str] = {}
 
             if self.execution_runner.workflow_requires_pr_scope(workflow_id):
-                pr_identity = self.execution_runner.resolve_pr_identity_for_workflow(workflow_id, args)
+                pr_identity = self._resolve_thread_pr_identity_from_headers()
                 if pr_identity is None:
                     return self._format_execution_result_markdown(
                         "Workflow CLI Execution",
                         self._error_execution_result(
                             "workflow preflight failed: PR-scoped workflow requires owner/repo/pr_number "
-                            "from normalized thread scope"
+                            "from thread-scoped MCP headers"
                         ),
                     )
 
@@ -213,9 +216,9 @@ class CrprMCPServer:
             result = await self.execution_runner.run_workflow_script(
                 workflow_id=workflow_id,
                 args=args,
-                timeout_seconds=request.timeout_seconds,
+                timeout_seconds=self.config.execution_timeout_default,
                 extra_env=extra_env,
-                enforce_timeout=False,
+                enforce_timeout=True,
             )
             return format_workflow_result_markdown(workflow_id, result)
         except ContextLifecycleError as exc:
@@ -238,7 +241,6 @@ class CrprMCPServer:
     async def run_custom_workflow_code(
         self,
         code: str,
-        timeout_seconds: int = 30,
     ) -> str:
         if self._shutdown_requested:
             return self._format_execution_result_markdown(
@@ -249,7 +251,6 @@ class CrprMCPServer:
         try:
             request = CustomWorkflowCodeRunRequest(
                 code=code,
-                timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
             return self._format_execution_result_markdown(
@@ -258,9 +259,21 @@ class CrprMCPServer:
             )
 
         try:
+            extra_env: dict[str, str] = {}
+            pr_identity = self._resolve_thread_pr_identity_from_headers()
+            if pr_identity is not None:
+                owner, repo, pr_number = pr_identity
+                extra_env.update(
+                    {
+                        "CRPR_CONTEXT_OWNER": owner,
+                        "CRPR_CONTEXT_REPO": repo,
+                        "CRPR_CONTEXT_PR_NUMBER": str(pr_number),
+                    }
+                )
             result = await self.execution_runner.run_custom_workflow_code(
                 code=request.code,
-                timeout_seconds=request.timeout_seconds,
+                timeout_seconds=self.config.execution_timeout_default,
+                extra_env=extra_env or None,
             )
             return self._format_execution_result_markdown("Custom Workflow Code Execution", result)
         except Exception as exc:
@@ -269,6 +282,19 @@ class CrprMCPServer:
                 "Custom Workflow Code Execution",
                 self._error_execution_result(f"runner internal exception: {exc}"),
             )
+
+    @staticmethod
+    def _resolve_thread_pr_identity_from_headers() -> tuple[str, str, int] | None:
+        headers = get_http_headers(include_all=True)
+        owner = str(headers.get(HEADER_THREAD_OWNER, "")).strip()
+        repo = str(headers.get(HEADER_THREAD_REPO, "")).strip()
+        try:
+            pr_number = int(headers.get(HEADER_THREAD_PR_NUMBER))
+        except (TypeError, ValueError):
+            pr_number = 0
+        if not owner or not repo or pr_number <= 0:
+            return None
+        return owner, repo, pr_number
 
     @staticmethod
     def _format_capability_error_markdown(capability_id: str, message: str) -> str:

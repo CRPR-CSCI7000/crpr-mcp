@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import github_tools, zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -88,9 +89,6 @@ class OutputModel(BaseModel):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Find cross-repository lexical overlap candidates for a PR.")
-    parser.add_argument("--owner", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument("--include-source-repo", type=_parse_bool, default=False)
     parser.add_argument("--max-repos", type=int, default=0)
     parser.add_argument("--per-term-limit", type=int, default=3)
@@ -366,14 +364,12 @@ def _build_suggested_alignment_checks(
 async def main():
     try:
         cli = parse_args()
-        owner = _coerce_required_string({"owner": cli.owner}, "owner")
-        repo = _coerce_required_string({"repo": cli.repo}, "repo")
-        pr_number = _coerce_required_int({"pr_number": cli.pr_number}, "pr_number")
+        owner, repo, pr_number = runtime_context.resolve_pr_identity()
         include_source_repo = bool(cli.include_source_repo)
         max_repos = int(cli.max_repos)
         per_term_limit = max(1, int(cli.per_term_limit))
 
-        files = await asyncio.to_thread(github_tools.list_pull_request_files, owner, repo, pr_number)
+        files = await asyncio.to_thread(github_tools.list_pull_request_files)
         changed_filenames = [
             str(file_info.get("filename", "")).strip()
             for file_info in files

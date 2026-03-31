@@ -17,8 +17,17 @@ file_context_reader = _load_file_context_reader_module()
 
 
 def _set_cli_args(monkeypatch, payload: dict[str, object]) -> None:
+    context_env_map = {
+        "source_owner": "CRPR_CONTEXT_OWNER",
+        "source_repo": "CRPR_CONTEXT_REPO",
+        "source_pr_number": "CRPR_CONTEXT_PR_NUMBER",
+    }
     argv: list[str] = []
     for key, value in payload.items():
+        env_name = context_env_map.get(key)
+        if env_name:
+            monkeypatch.setenv(env_name, str(value))
+            continue
         argv.append(f"--{key.replace('_', '-')}")
         argv.append(str(value))
     original_parse_args = file_context_reader.parse_args

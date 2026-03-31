@@ -44,7 +44,7 @@ Supports passing additional Zoekt filters inside `query` (for example repo/lang 
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "symbol_definition --query 'PaymentService lang:python'"`
+1. `symbol_definition --query 'PaymentService lang:python'`
 ### Constraints
 - Focused on definitions, not general usages.
 - Prefer adding `lang:` and `r:` filters for precision.

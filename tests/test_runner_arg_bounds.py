@@ -208,36 +208,12 @@ def test_run_custom_workflow_code_accepts_plain_json_stdout() -> None:
     assert result.result_json == {"ok": True, "count": 2}
 
 
-def test_resolve_pr_identity_for_pr_scoped_workflow() -> None:
-    identity = ExecutionRunner.resolve_pr_identity_for_workflow(
-        "pr_impact_assessment",
-        {"owner": "acme", "repo": "checkout", "pr_number": 12},
-    )
-    assert identity == ("acme", "checkout", 12)
-
-
-def test_resolve_pr_identity_prefers_thread_scope_fields() -> None:
-    identity = ExecutionRunner.resolve_pr_identity_for_workflow(
-        "symbol_usage",
-        {"thread_owner": "acme", "thread_repo": "checkout", "thread_pr_number": 14},
-    )
-    assert identity == ("acme", "checkout", 14)
-
-
-def test_resolve_pr_identity_returns_none_when_missing_required_fields() -> None:
-    identity = ExecutionRunner.resolve_pr_identity_for_workflow(
-        "pr_impact_assessment",
-        {"owner": "acme"},
-    )
-    assert identity is None
-
-
 def test_workflow_requires_pr_scope_matches_expected_workflows() -> None:
     assert ExecutionRunner.workflow_requires_pr_scope("pr_impact_assessment") is True
     assert ExecutionRunner.workflow_requires_pr_scope("symbol_usage") is True
 
 
-def test_parse_workflow_cli_accepts_hidden_pr_identity_flags_for_scoped_workflow() -> None:
+def test_parse_workflow_cli_rejects_pr_identity_flags_for_scoped_workflow() -> None:
     project_root = Path(__file__).resolve().parents[1]
     runner = ExecutionRunner(
         src_root=project_root / "src",
@@ -248,17 +224,11 @@ def test_parse_workflow_cli_accepts_hidden_pr_identity_flags_for_scoped_workflow
         stderr_max_bytes=32768,
     )
 
-    workflow_id, args = runner.parse_workflow_cli_command(
-        "pr_impact_assessment --owner acme --repo checkout --pr-number 12"
-    )
-
-    assert workflow_id == "pr_impact_assessment"
-    assert args["owner"] == "acme"
-    assert args["repo"] == "checkout"
-    assert args["pr_number"] == 12
+    with pytest.raises(ValueError, match="unknown flag"):
+        runner.parse_workflow_cli_command("pr_impact_assessment --owner acme --repo checkout --pr-number 12")
 
 
-def test_parse_workflow_cli_accepts_thread_scope_flags_for_non_pr_workflow() -> None:
+def test_parse_workflow_cli_rejects_thread_scope_flags_for_non_pr_workflow() -> None:
     project_root = Path(__file__).resolve().parents[1]
     runner = ExecutionRunner(
         src_root=project_root / "src",
@@ -269,18 +239,13 @@ def test_parse_workflow_cli_accepts_thread_scope_flags_for_non_pr_workflow() -> 
         stderr_max_bytes=32768,
     )
 
-    workflow_id, args = runner.parse_workflow_cli_command(
-        "symbol_usage --term ProcessOrder --thread-owner acme --thread-repo checkout --thread-pr-number 22"
-    )
-
-    assert workflow_id == "symbol_usage"
-    assert args["term"] == "ProcessOrder"
-    assert args["thread_owner"] == "acme"
-    assert args["thread_repo"] == "checkout"
-    assert args["thread_pr_number"] == 22
+    with pytest.raises(ValueError, match="unknown flag"):
+        runner.parse_workflow_cli_command(
+            "symbol_usage --term ProcessOrder --thread-owner acme --thread-repo checkout --thread-pr-number 22"
+        )
 
 
-def test_run_workflow_script_strips_thread_scope_flags_before_subprocess(tmp_path: Path, monkeypatch) -> None:
+def test_run_workflow_script_passes_args_through_to_subprocess(tmp_path: Path, monkeypatch) -> None:
     runner = _build_runner(tmp_path)
     captured: dict[str, object] = {}
 
@@ -306,6 +271,7 @@ def test_run_workflow_script_strips_thread_scope_flags_before_subprocess(tmp_pat
     assert result.success is True
     argv = captured["command"]
     assert isinstance(argv, list)
-    assert "--thread-owner" not in argv
-    assert "--thread-repo" not in argv
-    assert "--thread-pr-number" not in argv
+    bootstrap = " ".join(str(token) for token in argv)
+    assert "--thread-owner" in bootstrap
+    assert "--thread-repo" in bootstrap
+    assert "--thread-pr-number" in bootstrap

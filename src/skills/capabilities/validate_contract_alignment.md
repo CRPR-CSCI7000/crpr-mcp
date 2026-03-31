@@ -73,7 +73,7 @@ Returns structured drift findings with coverage warnings when extraction is spar
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "validate_contract_alignment --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --provider-ref-side head --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90"`
+1. `validate_contract_alignment --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --provider-ref-side head --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90`
 ### Constraints
 - Consumer reads are Zoekt-backed and must target indexed repositories.
 - Hard limit: each requested line window must be <= 60 lines.

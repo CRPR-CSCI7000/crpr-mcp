@@ -35,7 +35,7 @@ impact aggregates (status mix, directories, extensions, and largest deltas) in o
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_impact_assessment"`
+1. `pr_impact_assessment`
 ### Constraints
 - Returns compact file metadata and impact aggregates, not full patches.
 

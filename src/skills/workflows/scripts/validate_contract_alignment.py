@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from runtime import context as runtime_context
 from runtime import github_tools, zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -43,9 +44,6 @@ class OutputModel(BaseModel):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Validate contract alignment between source PR provider and cross-repo consumer.")
-    parser.add_argument("--provider-owner", required=True)
-    parser.add_argument("--provider-repo", required=True)
-    parser.add_argument("--provider-pr-number", type=int, required=True)
     parser.add_argument("--provider-path", required=True)
     parser.add_argument("--provider-start-line", type=int, required=True)
     parser.add_argument("--provider-end-line", type=int, required=True)
@@ -280,9 +278,7 @@ def _signal_count(signals: dict[str, list[str]]) -> int:
 async def main():
     try:
         cli = parse_args()
-        provider_owner = _coerce_required_string({"provider_owner": cli.provider_owner}, "provider_owner")
-        provider_repo = _coerce_required_string({"provider_repo": cli.provider_repo}, "provider_repo")
-        provider_pr_number = _coerce_required_int({"provider_pr_number": cli.provider_pr_number}, "provider_pr_number")
+        provider_owner, provider_repo, provider_pr_number = runtime_context.resolve_pr_identity()
         provider_path = _coerce_required_string({"provider_path": cli.provider_path}, "provider_path")
         provider_start_line = int(cli.provider_start_line)
         provider_end_line = int(cli.provider_end_line)
@@ -296,15 +292,13 @@ async def main():
         _validate_line_range(provider_start_line, provider_end_line, "provider")
         _validate_line_range(consumer_start_line, consumer_end_line, "consumer")
 
-        pr = await asyncio.to_thread(github_tools.get_pull_request, provider_owner, provider_repo, provider_pr_number)
+        pr = await asyncio.to_thread(github_tools.get_pull_request)
         if not isinstance(pr, Mapping):
             raise ValueError("unexpected pull request payload shape")
 
         provider_ref_name, provider_ref_sha = _extract_provider_ref(pr, provider_ref_side)
         provider_full_content = await asyncio.to_thread(
             github_tools.get_file_content,
-            provider_owner,
-            provider_repo,
             provider_path,
             provider_ref_sha,
         )

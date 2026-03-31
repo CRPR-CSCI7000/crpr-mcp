@@ -5,6 +5,7 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import github_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -29,9 +30,6 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Read a bounded line range from a pull request source file at head/base SHA."
     )
-    parser.add_argument("--owner", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--start-line", type=int, required=True)
     parser.add_argument("--end-line", type=int, required=True)
@@ -76,9 +74,7 @@ def _extract_ref_name(pr_payload: Mapping[str, object], ref_side: str) -> str:
 async def main():
     try:
         cli = parse_args()
-        owner = _coerce_required_string({"owner": cli.owner}, "owner")
-        repo = _coerce_required_string({"repo": cli.repo}, "repo")
-        pr_number = _coerce_required_int({"pr_number": cli.pr_number}, "pr_number")
+        owner, repo, pr_number = runtime_context.resolve_pr_identity()
         path = _coerce_required_string({"path": cli.path}, "path")
         ref_side = str(cli.ref_side).strip().lower() or "head"
         if ref_side not in {"head", "base"}:
@@ -96,13 +92,13 @@ async def main():
                 f"requested line window {requested_window} exceeds max {MAX_LINE_WINDOW}; narrow range and retry"
             )
 
-        pr = await asyncio.to_thread(github_tools.get_pull_request, owner, repo, pr_number)
+        pr = await asyncio.to_thread(github_tools.get_pull_request)
         if not isinstance(pr, Mapping):
             raise ValueError("unexpected pull request payload shape")
         ref_sha = _extract_sha(pr, ref_side=ref_side)
         ref_name = _extract_ref_name(pr, ref_side=ref_side)
 
-        full_content = await asyncio.to_thread(github_tools.get_file_content, owner, repo, path, ref_sha)
+        full_content = await asyncio.to_thread(github_tools.get_file_content, path, ref_sha)
         all_lines = full_content.splitlines()
         start_index = start_line - 1
         end_index = min(len(all_lines), end_line)

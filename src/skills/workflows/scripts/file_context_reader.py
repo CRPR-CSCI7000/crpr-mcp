@@ -4,6 +4,7 @@ import json
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -26,9 +27,6 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Read a bounded line range from one non-source repository file via Zoekt."
     )
-    parser.add_argument("--source-owner", required=True)
-    parser.add_argument("--source-repo", required=True)
-    parser.add_argument("--source-pr-number", type=int, required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--start-line", type=int, required=True)
@@ -56,15 +54,7 @@ def _is_source_repo(candidate_repo: str, source_owner: str, source_repo: str) ->
 async def main():
     try:
         cli = parse_args()
-        source_owner = str(cli.source_owner).strip()
-        source_repo = str(cli.source_repo).strip()
-        if not source_owner:
-            raise ValueError("missing required arg: source_owner")
-        if not source_repo:
-            raise ValueError("missing required arg: source_repo")
-        source_pr_number = int(cli.source_pr_number)
-        if source_pr_number <= 0:
-            raise ValueError("source_pr_number must be > 0")
+        source_owner, source_repo, source_pr_number = runtime_context.resolve_pr_identity()
 
         repo = str(cli.repo).strip()
         path = str(cli.path).strip()

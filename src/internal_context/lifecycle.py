@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import Any
 
-import requests
+import httpx
 
 
 class ContextLifecycleError(RuntimeError):
@@ -51,16 +50,9 @@ class ContextLifecycleManager:
             "wait": bool(wait),
         }
 
-        timeout: float | tuple[float, float] | None
-        timeout = None if wait else (5.0, 15.0)
-
         try:
-            response = requests.post(
-                f"{self.zoekt_api_url}/internal/context/ensure",
-                json=payload,
-                timeout=timeout,
-            )
-        except requests.RequestException as exc:
+            response = await self._post_ensure(payload=payload, wait=bool(wait))
+        except httpx.HTTPError as exc:
             raise ContextLifecycleError(f"failed to call Zoekt ensure endpoint: {exc}") from exc
 
         body = _decode_json_body(response)
@@ -95,11 +87,14 @@ class ContextLifecycleManager:
             manifest_path=manifest_path,
         )
 
-    @staticmethod
-    def build_context_id(owner: str, repo: str, pr_number: int, anchor_created_at: str) -> str:
-        identity_key = f"{owner.lower()}/{repo.lower()}/{int(pr_number)}@{anchor_created_at}"
-        digest = hashlib.sha1(identity_key.encode("utf-8")).hexdigest()[:20]
-        return f"ctx_{digest}"
+    async def _post_ensure(self, *, payload: dict[str, Any], wait: bool) -> httpx.Response:
+        timeout = None if wait else httpx.Timeout(15.0, connect=5.0)
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                f"{self.zoekt_api_url}/internal/context/ensure",
+                json=payload,
+                timeout=timeout,
+            )
 
     @staticmethod
     def from_environment(
@@ -109,7 +104,7 @@ class ContextLifecycleManager:
         return ContextLifecycleManager(zoekt_api_url=zoekt_api_url)
 
 
-def _decode_json_body(response: requests.Response) -> Any:
+def _decode_json_body(response: Any) -> Any:
     try:
         return response.json()
     except ValueError:

@@ -54,7 +54,7 @@ In PR-scoped analysis this workflow is cross-repo only; source repository reads 
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "file_context_reader --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85"`
+1. `file_context_reader --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85`
 ### Constraints
 - Source-repo reads are blocked; use `pr_file_context_reader` for source PR repository content.
 - Requires a file path, not a directory.

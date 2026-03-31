@@ -20,8 +20,17 @@ pr_file_context_reader = _load_module()
 
 
 def _set_cli_args(monkeypatch, payload: dict[str, object]) -> None:
+    context_env_map = {
+        "owner": "CRPR_CONTEXT_OWNER",
+        "repo": "CRPR_CONTEXT_REPO",
+        "pr_number": "CRPR_CONTEXT_PR_NUMBER",
+    }
     argv: list[str] = []
     for key, value in payload.items():
+        env_name = context_env_map.get(key)
+        if env_name:
+            monkeypatch.setenv(env_name, str(value))
+            continue
         argv.append(f"--{key.replace('_', '-')}")
         argv.append(str(value))
     original_parse_args = pr_file_context_reader.parse_args
@@ -55,15 +64,15 @@ def test_pr_file_context_reader_reads_head_sha_content(monkeypatch, capsys) -> N
     monkeypatch.setattr(
         pr_file_context_reader.github_tools,
         "get_pull_request",
-        lambda owner, repo, pr_number: {
+        lambda: {
             "head": {"sha": "headsha123", "ref": "feature/thing"},
             "base": {"sha": "basesha456", "ref": "main"},
         },
     )
-    calls: list[tuple[str, str, str, str]] = []
+    calls: list[tuple[str, str]] = []
 
-    def fake_get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -> str:
-        calls.append((owner, repo, path, str(ref)))
+    def fake_get_file_content(path: str, ref: str | None = None) -> str:
+        calls.append((path, str(ref)))
         return "line1\nline2\nline3\nline4"
 
     monkeypatch.setattr(pr_file_context_reader.github_tools, "get_file_content", fake_get_file_content)
@@ -73,7 +82,7 @@ def test_pr_file_context_reader_reads_head_sha_content(monkeypatch, capsys) -> N
     payload = _parse_result_payload(captured.out)
 
     assert exit_code == 0
-    assert calls == [("acme", "checkout", "src/service.py", "headsha123")]
+    assert calls == [("src/service.py", "headsha123")]
     assert payload["content"] == "line2\nline3"
     assert payload["ref_side"] == "head"
     assert payload["ref_name"] == "feature/thing"
@@ -96,11 +105,11 @@ def test_pr_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsy
 
     called = {"pull": False, "content": False}
 
-    def fake_get_pull_request(owner: str, repo: str, pr_number: int) -> dict[str, object]:
+    def fake_get_pull_request() -> dict[str, object]:
         called["pull"] = True
         return {}
 
-    def fake_get_file_content(owner: str, repo: str, path: str, ref: str | None = None) -> str:
+    def fake_get_file_content(path: str, ref: str | None = None) -> str:
         called["content"] = True
         return ""
 

@@ -17,12 +17,10 @@ class ExecutionResult(BaseModel):
 
 class WorkflowCliRunRequest(BaseModel):
     command: str
-    timeout_seconds: int = 30
 
 
 class CustomWorkflowCodeRunRequest(BaseModel):
     code: str
-    timeout_seconds: int = 30
 
 
 class GitHubRPCRequest(BaseModel):
