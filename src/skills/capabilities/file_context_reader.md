@@ -6,14 +6,6 @@ order: 4
 execution:
   script_path: skills/workflows/scripts/file_context_reader.py
   arg_schema:
-    source_owner:
-      type: string
-      required: true
-      description: Source PR repository owner/org.
-    source_repo:
-      type: string
-      required: true
-      description: Source PR repository name.
     repo:
       type: string
       required: true
@@ -62,7 +54,7 @@ In PR-scoped analysis this workflow is cross-repo only; source repository reads 
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "file_context_reader --source-owner acme --source-repo checkout --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85"`
+1. `run_workflow_cli --command "file_context_reader --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85"`
 ### Constraints
 - Source-repo reads are blocked; use `pr_file_context_reader` for source PR repository content.
 - Requires a file path, not a directory.

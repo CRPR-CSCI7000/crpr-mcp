@@ -35,6 +35,20 @@ def test_search_uses_context_line_value_when_in_bounds() -> None:
     assert called_kwargs["params"]["ctx"] == 2
 
 
+def test_search_includes_context_id_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CRPR_CONTEXT_ID", "ctx_abc")
+    runtime = ZoektRuntime(base_url="http://zoekt")
+    response = Mock()
+    response.json.return_value = {"result": {"FileMatches": []}}
+
+    with patch("runtime.zoekt_tools.requests.get", return_value=response) as mock_get:
+        runtime.search(query="ProcessOrder", limit=7, context_lines=2)
+
+    assert mock_get.call_count == 1
+    called_kwargs = mock_get.call_args.kwargs
+    assert called_kwargs["params"]["context_id"] == "ctx_abc"
+
+
 def test_fetch_content_rejects_line_windows_above_max() -> None:
     runtime = ZoektRuntime(base_url="http://zoekt")
 
@@ -82,3 +96,32 @@ def test_fetch_content_surfaces_print_error_body() -> None:
                 start_line=1,
                 end_line=10,
             )
+
+
+def test_list_repos_posts_context_id_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CRPR_CONTEXT_ID", "ctx_abc")
+    runtime = ZoektRuntime(base_url="http://zoekt")
+    response = Mock()
+    response.json.return_value = {"List": {"Repos": []}}
+
+    with patch("runtime.zoekt_tools.requests.post", return_value=response) as mock_post:
+        repos = runtime.list_repos()
+
+    assert repos == []
+    assert mock_post.call_count == 1
+    called_kwargs = mock_post.call_args.kwargs
+    assert called_kwargs["json"]["context_id"] == "ctx_abc"
+
+
+def test_list_repos_all_hits_list_all_endpoint() -> None:
+    runtime = ZoektRuntime(base_url="http://zoekt")
+    response = Mock()
+    response.json.return_value = {"List": {"Repos": [{"Repository": {"Name": "github.com/acme/checkout"}}]}}
+
+    with patch("runtime.zoekt_tools.requests.post", return_value=response) as mock_post:
+        repos = runtime.list_repos_all()
+
+    assert repos == ["github.com/acme/checkout"]
+    assert mock_post.call_count == 1
+    called_url = mock_post.call_args.args[0]
+    assert called_url.endswith("/api/list-all")

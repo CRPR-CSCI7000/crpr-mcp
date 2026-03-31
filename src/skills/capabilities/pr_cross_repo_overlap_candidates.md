@@ -6,19 +6,6 @@ order: 7
 execution:
   script_path: skills/workflows/scripts/pr_cross_repo_overlap_candidates.py
   arg_schema:
-    owner:
-      type: string
-      required: true
-      description: Repository owner or organization.
-    repo:
-      type: string
-      required: true
-      description: Repository name.
-    pr_number:
-      type: integer
-      required: true
-      minimum: 1
-      description: Pull request number.
     include_source_repo:
       type: boolean
       required: false
@@ -65,8 +52,8 @@ By default, all indexed repositories are scanned and the canonical source repo i
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_cross_repo_overlap_candidates --owner acme --repo checkout --pr-number 123"`
-2. `run_workflow_cli --command "pr_cross_repo_overlap_candidates --owner acme --repo checkout --pr-number 123 --include-source-repo true"`
+1. `run_workflow_cli --command "pr_cross_repo_overlap_candidates"`
+2. `run_workflow_cli --command "pr_cross_repo_overlap_candidates --include-source-repo true"`
 ### Constraints
 - Defaults to all indexed repositories.
 - Canonical source repo is excluded by default unless `include_source_repo=true`.

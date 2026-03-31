@@ -13,6 +13,7 @@ MAX_LINE_WINDOW = 60
 class OutputModel(BaseModel):
     source_owner: str
     source_repo: str
+    source_pr_number: int
     repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
     path: str
     start_line: int
@@ -27,6 +28,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--source-owner", required=True)
     parser.add_argument("--source-repo", required=True)
+    parser.add_argument("--source-pr-number", type=int, required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--start-line", type=int, required=True)
@@ -60,6 +62,9 @@ async def main():
             raise ValueError("missing required arg: source_owner")
         if not source_repo:
             raise ValueError("missing required arg: source_repo")
+        source_pr_number = int(cli.source_pr_number)
+        if source_pr_number <= 0:
+            raise ValueError("source_pr_number must be > 0")
 
         repo = str(cli.repo).strip()
         path = str(cli.path).strip()
@@ -90,6 +95,7 @@ async def main():
         output = {
             "source_owner": source_owner,
             "source_repo": source_repo,
+            "source_pr_number": source_pr_number,
             "repo": repo,
             "path": path,
             "start_line": start_line,

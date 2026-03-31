@@ -22,6 +22,7 @@ from .execution.models import (
 )
 from .execution.runner import ExecutionRunner
 from .execution.safety import get_allowed_runtime_modules
+from .internal_context import ContextLifecycleError, ContextLifecycleManager
 from .skills.registry import SkillRegistry
 from .skills.workflows.renderers import format_workflow_result_markdown
 
@@ -57,6 +58,9 @@ class CrprMCPServer:
             stdout_max_bytes=self.config.execution_stdout_max_bytes,
             stderr_max_bytes=self.config.execution_stderr_max_bytes,
             github_rpc_url=github_rpc_url,
+        )
+        self.context_lifecycle = ContextLifecycleManager(
+            zoekt_api_url=self.config.zoekt_api_url,
         )
 
     def _load_tool_descriptions(self) -> None:
@@ -174,11 +178,51 @@ class CrprMCPServer:
             )
 
         try:
-            workflow_id, result = await self.execution_runner.run_workflow_cli_command(
-                command=request.command,
+            workflow_id, args = self.execution_runner.parse_workflow_cli_command(request.command)
+            extra_env: dict[str, str] = {}
+
+            if self.execution_runner.workflow_requires_pr_scope(workflow_id):
+                pr_identity = self.execution_runner.resolve_pr_identity_for_workflow(workflow_id, args)
+                if pr_identity is None:
+                    return self._format_execution_result_markdown(
+                        "Workflow CLI Execution",
+                        self._error_execution_result(
+                            "workflow preflight failed: PR-scoped workflow requires owner/repo/pr_number "
+                            "from normalized thread scope"
+                        ),
+                    )
+
+                owner, repo, pr_number = pr_identity
+                resolved_context = await self.context_lifecycle.ensure_pr_context(
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    wait=True,
+                )
+                extra_env.update(
+                    {
+                        "CRPR_CONTEXT_ID": resolved_context.context_id,
+                        "CRPR_CONTEXT_OWNER": resolved_context.owner,
+                        "CRPR_CONTEXT_REPO": resolved_context.repo,
+                        "CRPR_CONTEXT_PR_NUMBER": str(resolved_context.pr_number),
+                        "CRPR_CONTEXT_ANCHOR_CREATED_AT": resolved_context.anchor_created_at,
+                        "CRPR_CONTEXT_MANIFEST_PATH": resolved_context.manifest_path,
+                    }
+                )
+
+            result = await self.execution_runner.run_workflow_script(
+                workflow_id=workflow_id,
+                args=args,
                 timeout_seconds=request.timeout_seconds,
+                extra_env=extra_env,
+                enforce_timeout=False,
             )
             return format_workflow_result_markdown(workflow_id, result)
+        except ContextLifecycleError as exc:
+            return self._format_execution_result_markdown(
+                "Workflow CLI Execution",
+                self._error_execution_result(f"workflow preflight failed: {exc}"),
+            )
         except ValueError as exc:
             return self._format_execution_result_markdown(
                 "Workflow CLI Execution",
@@ -438,6 +482,8 @@ class CrprMCPServer:
 
                 if not hasattr(self, "execution_runner") or self.execution_runner is None:
                     return JSONResponse({"status": "not_ready", "reason": "execution_runner_unavailable"}, status_code=503)
+                if not hasattr(self, "context_lifecycle") or self.context_lifecycle is None:
+                    return JSONResponse({"status": "not_ready", "reason": "context_lifecycle_unavailable"}, status_code=503)
 
                 if not self.skills_root.exists():
                     return JSONResponse(

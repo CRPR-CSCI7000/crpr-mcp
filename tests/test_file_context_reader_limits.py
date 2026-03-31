@@ -37,6 +37,7 @@ def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> N
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/repo",
             "path": "src/main.go",
             "start_line": 1,
@@ -65,6 +66,7 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/repo",
             "path": "src/main.go",
             "start_line": 1,
@@ -93,6 +95,7 @@ def test_file_context_reader_rejects_source_repo_reads(monkeypatch, capsys) -> N
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/checkout",
             "path": "src/main.go",
             "start_line": 1,

@@ -6,19 +6,6 @@ order: 5
 execution:
   script_path: skills/workflows/scripts/pr_file_context_reader.py
   arg_schema:
-    owner:
-      type: string
-      required: true
-      description: Source PR repository owner or organization.
-    repo:
-      type: string
-      required: true
-      description: Source PR repository name.
-    pr_number:
-      type: integer
-      required: true
-      minimum: 1
-      description: Pull request number.
     path:
       type: string
       required: true
@@ -68,8 +55,8 @@ This avoids branch/index ambiguity when evaluating source PR changes.
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_file_context_reader --owner acme --repo checkout --pr-number 123 --path src/service.py --start-line 20 --end-line 60 --ref-side head"`
-2. `run_workflow_cli --command "pr_file_context_reader --owner acme --repo checkout --pr-number 123 --path src/service.py --start-line 20 --end-line 60 --ref-side base"`
+1. `run_workflow_cli --command "pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side head"`
+2. `run_workflow_cli --command "pr_file_context_reader --path src/service.py --start-line 20 --end-line 60 --ref-side base"`
 ### Constraints
 - Uses GitHub PR metadata and repository contents API.
 - Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines.
