@@ -16,7 +16,6 @@ doc_type: view
 - Always call `read_capability` before using any capability from this list.
 - `list_capabilities` is intentionally brief and omits arg schemas/examples/constraints.
 - Do not execute capabilities from list output alone; use `read_capability` first.
-- For source PR files (including changed files), use `pr_file_context_reader`.
-- `file_context_reader` is cross-repo only; source-repo reads are rejected.
+- Use `file_context_reader` for most source/cross-repo file reads in scoped Zoekt context.
 
 {{DISCOVERY_ITEMS}}

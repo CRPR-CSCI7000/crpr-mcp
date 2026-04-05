@@ -88,16 +88,14 @@ Required for GitHub-backed PR workflows (GitHub App preferred, PAT fallback):
 
 - `GITHUB_TOKEN` (PAT fallback when GitHub App auth is not configured or fails)
   - Used by workflows such as `pr_impact_assessment`,
-    `pr_cross_repo_overlap_candidates`, `pr_file_context_reader`, and
-    `validate_contract_alignment` (provider-side reads).
+    and `pr_cross_repo_overlap_candidates`.
   - Token should have access to the repositories being analyzed.
 
 Optional:
 
 - `MCP_SSE_PORT` (default `8000`)
 - `MCP_STREAMABLE_HTTP_PORT` (default `8080`)
-- `EXECUTION_TIMEOUT_DEFAULT` (default `30`)
-- `EXECUTION_TIMEOUT_MAX` (default `120`)
+- `EXECUTION_TIMEOUT_SECONDS` (default `300`)
 - `EXECUTION_STDOUT_MAX_BYTES` (default `32768`)
 - `EXECUTION_STDERR_MAX_BYTES` (default `32768`)
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from src.execution.models import ExecutionResult
 from src.execution.runner import ExecutionRunner
 
 
@@ -67,6 +68,9 @@ class OutputModel(BaseModel):
 def _build_runner(tmp_path: Path) -> ExecutionRunner:
     skills_root = tmp_path / "skills"
     _write_skill(skills_root)
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    (runtime_root / "__init__.py").write_text("", encoding="utf-8")
     return ExecutionRunner(
         src_root=tmp_path,
         skills_root=skills_root,
@@ -202,3 +206,72 @@ def test_run_custom_workflow_code_accepts_plain_json_stdout() -> None:
 
     assert result.success is True
     assert result.result_json == {"ok": True, "count": 2}
+
+
+def test_workflow_requires_pr_scope_matches_expected_workflows() -> None:
+    assert ExecutionRunner.workflow_requires_pr_scope("pr_impact_assessment") is True
+    assert ExecutionRunner.workflow_requires_pr_scope("symbol_usage") is True
+
+
+def test_parse_workflow_cli_rejects_pr_identity_flags_for_scoped_workflow() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    runner = ExecutionRunner(
+        src_root=project_root / "src",
+        skills_root=project_root / "src" / "skills",
+        timeout_default=30,
+        timeout_max=120,
+        stdout_max_bytes=32768,
+        stderr_max_bytes=32768,
+    )
+
+    with pytest.raises(ValueError, match="unknown flag"):
+        runner.parse_workflow_cli_command("pr_impact_assessment --owner acme --repo checkout --pr-number 12")
+
+
+def test_parse_workflow_cli_rejects_thread_scope_flags_for_non_pr_workflow() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    runner = ExecutionRunner(
+        src_root=project_root / "src",
+        skills_root=project_root / "src" / "skills",
+        timeout_default=30,
+        timeout_max=120,
+        stdout_max_bytes=32768,
+        stderr_max_bytes=32768,
+    )
+
+    with pytest.raises(ValueError, match="unknown flag"):
+        runner.parse_workflow_cli_command(
+            "symbol_usage --term ProcessOrder --thread-owner acme --thread-repo checkout --thread-pr-number 22"
+        )
+
+
+def test_run_workflow_script_passes_args_through_to_subprocess(tmp_path: Path, monkeypatch) -> None:
+    runner = _build_runner(tmp_path)
+    captured: dict[str, object] = {}
+
+    async def _fake_execute(*, command, **kwargs):  # noqa: ANN001
+        captured["command"] = list(command)
+        return ExecutionResult(success=True, exit_code=0, result_json={"ok": True})
+
+    monkeypatch.setattr(runner, "_execute", _fake_execute)
+
+    result = asyncio.run(
+        runner.run_workflow_script(
+            workflow_id="symbol_usage",
+            args={
+                "term": "ProcessOrder",
+                "thread_owner": "acme",
+                "thread_repo": "checkout",
+                "thread_pr_number": 22,
+            },
+            timeout_seconds=30,
+        )
+    )
+
+    assert result.success is True
+    argv = captured["command"]
+    assert isinstance(argv, list)
+    bootstrap = " ".join(str(token) for token in argv)
+    assert "--thread-owner" in bootstrap
+    assert "--thread-repo" in bootstrap
+    assert "--thread-pr-number" in bootstrap

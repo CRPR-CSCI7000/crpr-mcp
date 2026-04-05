@@ -79,14 +79,14 @@ Exactly one of `term` or `raw_query` is required.
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5"`
-2. `run_workflow_cli --command "symbol_usage --term add_to_pantry --repo github.com/acme/ui --expand-variants true --limit 8"`
-3. `run_workflow_cli --command "symbol_usage --raw-query 'r:github.com/acme/ui addToPantry lang:javascript -f:test' --limit 8 --context-lines 1"`
+1. `symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`
+2. `symbol_usage --term add_to_pantry --repo github.com/acme/ui --expand-variants true --limit 8`
+3. `symbol_usage --raw-query 'r:github.com/acme/ui addToPantry lang:javascript -f:test' --limit 8 --context-lines 1`
 ### Constraints
 - Exactly one of `term` or `raw_query` is required.
 - Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).
 - For definitions use `symbol_definition` instead.
-- Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
+- Prefer this workflow to narrow targets before `file_context_reader`.
 - `context_lines` is hard-limited to 10.
 
 ### Expected Output Summary

@@ -10,6 +10,7 @@ DEFAULT_CONTEXT_LINES = 5
 MAX_SEARCH_LIMIT = 25
 MAX_CONTEXT_LINES = 10
 MAX_FETCH_WINDOW_LINES = 60
+_CONTEXT_ID_ENV = "CRPR_CONTEXT_ID"
 
 
 class ZoektRuntimeError(RuntimeError):
@@ -17,11 +18,12 @@ class ZoektRuntimeError(RuntimeError):
 
 
 class ZoektRuntime:
-    def __init__(self, base_url: str | None = None) -> None:
+    def __init__(self, base_url: str | None = None, context_id: str | None = None) -> None:
         configured_base_url = base_url or os.getenv("ZOEKT_API_URL")
         if not configured_base_url:
             raise ZoektRuntimeError("ZOEKT_API_URL is not set")
         self.base_url = configured_base_url.rstrip("/")
+        self.context_id = str(context_id or os.getenv(_CONTEXT_ID_ENV, "")).strip() or None
 
     def search(self, query: str, limit: int = DEFAULT_SEARCH_LIMIT, context_lines: int = DEFAULT_CONTEXT_LINES) -> list[dict[str, Any]]:
         normalized_context_lines = int(context_lines)
@@ -34,6 +36,8 @@ class ZoektRuntime:
             "format": "json",
             "ctx": normalized_context_lines,
         }
+        if self.context_id:
+            params["context_id"] = self.context_id
         response = requests.get(f"{self.base_url}/search", params=params, timeout=15)
         response.raise_for_status()
         payload = response.json()
@@ -58,6 +62,8 @@ class ZoektRuntime:
             "r": _clean_repository_path(repo),
             "f": path,
         }
+        if self.context_id:
+            params["context_id"] = self.context_id
         response = requests.get(f"{self.base_url}/print", params=params, timeout=15)
         try:
             response.raise_for_status()
@@ -95,6 +101,8 @@ class ZoektRuntime:
             "num": 1000,
             "format": "json",
         }
+        if self.context_id:
+            params["context_id"] = self.context_id
         response = requests.get(f"{self.base_url}/search", params=params, timeout=15)
         response.raise_for_status()
         payload = response.json()
@@ -112,7 +120,10 @@ class ZoektRuntime:
         return _format_directory_tree(file_paths=file_paths, base_path=normalized_path, max_depth=max(1, int(depth)))
 
     def list_repos(self) -> list[str]:
-        response = requests.post(f"{self.base_url}/api/list", json={}, timeout=15)
+        payload: dict[str, Any] = {}
+        if self.context_id:
+            payload["context_id"] = self.context_id
+        response = requests.post(f"{self.base_url}/api/list", json=payload, timeout=15)
         response.raise_for_status()
         payload = response.json()
 
@@ -123,6 +134,19 @@ class ZoektRuntime:
             if name:
                 repos.append(name)
 
+        return sorted(set(repos))
+
+    def list_repos_all(self) -> list[str]:
+        response = requests.post(f"{self.base_url}/api/list-all", json={}, timeout=15)
+        response.raise_for_status()
+        payload = response.json()
+
+        repos = []
+        for item in (payload.get("List", {}).get("Repos") or []):
+            repo_info = item.get("Repository") or {}
+            name = repo_info.get("Name")
+            if name:
+                repos.append(name)
         return sorted(set(repos))
 
 
@@ -154,6 +178,10 @@ def list_dir(repo: str, path: str = "", depth: int = 2) -> str:
 
 def list_repos() -> list[str]:
     return _get_runtime().list_repos()
+
+
+def list_repos_all() -> list[str]:
+    return _get_runtime().list_repos_all()
 
 
 def _clean_repository_path(repository: str) -> str:

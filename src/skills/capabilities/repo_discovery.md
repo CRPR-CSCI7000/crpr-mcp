@@ -44,7 +44,7 @@ This workflow transforms the objective into a `type:repo` query and returns rank
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "repo_discovery --query 'auth token refresh' --limit 12"`
+1. `repo_discovery --query 'auth token refresh' --limit 12`
 ### Constraints
 - Keep `limit` small (5-15) for focused discovery.
 - Uses Zoekt repository search mode (`type:repo`).

@@ -17,8 +17,17 @@ file_context_reader = _load_file_context_reader_module()
 
 
 def _set_cli_args(monkeypatch, payload: dict[str, object]) -> None:
+    context_env_map = {
+        "source_owner": "CRPR_CONTEXT_OWNER",
+        "source_repo": "CRPR_CONTEXT_REPO",
+        "source_pr_number": "CRPR_CONTEXT_PR_NUMBER",
+    }
     argv: list[str] = []
     for key, value in payload.items():
+        env_name = context_env_map.get(key)
+        if env_name:
+            monkeypatch.setenv(env_name, str(value))
+            continue
         argv.append(f"--{key.replace('_', '-')}")
         argv.append(str(value))
     original_parse_args = file_context_reader.parse_args
@@ -37,6 +46,7 @@ def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> N
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/repo",
             "path": "src/main.go",
             "start_line": 1,
@@ -65,6 +75,7 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/repo",
             "path": "src/main.go",
             "start_line": 1,
@@ -81,18 +92,19 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
     assert "narrow range and retry" in captured.out
 
 
-def test_file_context_reader_rejects_source_repo_reads(monkeypatch, capsys) -> None:
+def test_file_context_reader_allows_source_repo_reads(monkeypatch, capsys) -> None:
     called = {"fetch_content": False}
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
         called["fetch_content"] = True
-        return "unused"
+        return "source line"
 
     _set_cli_args(
         monkeypatch,
         {
             "source_owner": "org",
             "source_repo": "checkout",
+            "source_pr_number": 7,
             "repo": "github.com/org/checkout",
             "path": "src/main.go",
             "start_line": 1,
@@ -102,8 +114,35 @@ def test_file_context_reader_rejects_source_repo_reads(monkeypatch, capsys) -> N
     monkeypatch.setattr(file_context_reader.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(file_context_reader.main())
-    captured = capsys.readouterr()
+    _ = capsys.readouterr()
 
-    assert exit_code == 1
-    assert called["fetch_content"] is False
-    assert "source repository reads are blocked" in captured.out
+    assert exit_code == 0
+    assert called["fetch_content"] is True
+
+
+def test_file_context_reader_normalizes_owner_repo_input(monkeypatch, capsys) -> None:
+    call_log: list[tuple[str, str, int, int]] = []
+
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        call_log.append((repo, path, start_line, end_line))
+        return "line content"
+
+    _set_cli_args(
+        monkeypatch,
+        {
+            "source_owner": "CRPR-CSCI7000",
+            "source_repo": "pantry_pal_api_TEST",
+            "source_pr_number": 7,
+            "repo": "CRPR-CSCI7000/pantry_pal_api_TEST",
+            "path": "routes/pantry_routes.py",
+            "start_line": 1,
+            "end_line": 60,
+        },
+    )
+    monkeypatch.setattr(file_context_reader.zoekt_tools, "fetch_content", fake_fetch_content)
+
+    exit_code = asyncio.run(file_context_reader.main())
+    _ = capsys.readouterr()
+
+    assert exit_code == 0
+    assert call_log == [("github.com/crpr-csci7000/pantry_pal_api_test", "routes/pantry_routes.py", 1, 60)]

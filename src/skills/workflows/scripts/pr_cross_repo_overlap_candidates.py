@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import github_tools, zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -88,9 +89,6 @@ class OutputModel(BaseModel):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Find cross-repository lexical overlap candidates for a PR.")
-    parser.add_argument("--owner", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr-number", type=int, required=True)
     parser.add_argument("--include-source-repo", type=_parse_bool, default=False)
     parser.add_argument("--max-repos", type=int, default=0)
     parser.add_argument("--per-term-limit", type=int, default=3)
@@ -154,8 +152,33 @@ def _is_specific_term(term: str) -> bool:
     return normalized not in _GENERIC_TERM_BLACKLIST
 
 
-def _build_search_terms(files: list[dict[str, object]], limit: int = 12) -> list[str]:
+def _build_repo_seed_terms(repo_name: str) -> list[str]:
+    normalized = repo_name.strip().lower()
+    if not normalized:
+        return []
+
+    parts = [part for part in re.split(r"[^a-z0-9]+", normalized) if part]
     ordered = OrderedDict()
+    for part in parts:
+        ordered[part] = None
+    if len(parts) >= 2:
+        for start in range(len(parts)):
+            for width in (2, 3):
+                end = start + width
+                if end > len(parts):
+                    continue
+                joined = "_".join(parts[start:end])
+                if joined:
+                    ordered[joined] = None
+    return list(ordered.keys())
+
+
+def _build_search_terms(files: list[dict[str, object]], source_repo: str, limit: int = 12) -> list[str]:
+    ordered = OrderedDict()
+    for seeded in _build_repo_seed_terms(source_repo):
+        if _is_specific_term(seeded):
+            ordered[seeded] = None
+
     for file_info in files:
         filename = str(file_info.get("filename", "")).strip()
         if not filename:
@@ -297,9 +320,6 @@ def _first_sample_line(sample: Mapping[str, object]) -> int:
 
 
 def _build_suggested_alignment_checks(
-    owner: str,
-    repo: str,
-    pr_number: int,
     changed_filenames: list[str],
     overlap_candidates: list[dict[str, object]],
     limit: int = 12,
@@ -344,13 +364,9 @@ def _build_suggested_alignment_checks(
                 suggestions.append(
                     {
                         "term": term,
-                        "provider_owner": owner,
-                        "provider_repo": repo,
-                        "provider_pr_number": pr_number,
                         "provider_path": provider_path,
                         "provider_start_line": 1,
                         "provider_end_line": 60,
-                        "provider_ref_side": "head",
                         "consumer_repo": consumer_repo,
                         "consumer_path": consumer_path,
                         "consumer_start_line": consumer_start_line,
@@ -366,20 +382,18 @@ def _build_suggested_alignment_checks(
 async def main():
     try:
         cli = parse_args()
-        owner = _coerce_required_string({"owner": cli.owner}, "owner")
-        repo = _coerce_required_string({"repo": cli.repo}, "repo")
-        pr_number = _coerce_required_int({"pr_number": cli.pr_number}, "pr_number")
+        owner, repo, pr_number = runtime_context.resolve_pr_identity()
         include_source_repo = bool(cli.include_source_repo)
         max_repos = int(cli.max_repos)
         per_term_limit = max(1, int(cli.per_term_limit))
 
-        files = await asyncio.to_thread(github_tools.list_pull_request_files, owner, repo, pr_number)
+        files = await asyncio.to_thread(github_tools.list_pull_request_files)
         changed_filenames = [
             str(file_info.get("filename", "")).strip()
             for file_info in files
             if str(file_info.get("filename", "")).strip()
         ]
-        search_terms = _build_search_terms(files)
+        search_terms = _build_search_terms(files, source_repo=repo)
 
         indexed_repos = await asyncio.to_thread(zoekt_tools.list_repos)
         excluded_source_repos: list[str] = []
@@ -405,6 +419,15 @@ async def main():
                 except Exception as exc:
                     errors.append({"repo": indexed_repo, "term": term, "error": str(exc)})
                     continue
+                match_mode = "content"
+                if not results:
+                    repo_name_query = f"r:{indexed_repo} type:repo {term}"
+                    try:
+                        results = await asyncio.to_thread(zoekt_tools.search, repo_name_query, per_term_limit, 0)
+                    except Exception as exc:
+                        errors.append({"repo": indexed_repo, "term": term, "error": str(exc)})
+                        continue
+                    match_mode = "repo_name"
                 if not results:
                     continue
                 hit_count = len(results)
@@ -413,6 +436,7 @@ async def main():
                     {
                         "term": term,
                         "hits": hit_count,
+                        "match_mode": match_mode,
                         "samples": results[:2],
                     }
                 )
@@ -462,9 +486,6 @@ async def main():
                 "downstream_payload_mapping_validation",
             ],
             "suggested_alignment_checks": _build_suggested_alignment_checks(
-                owner=owner,
-                repo=repo,
-                pr_number=pr_number,
                 changed_filenames=changed_filenames,
                 overlap_candidates=overlap_candidates,
             ),

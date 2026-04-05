@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import github_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -27,9 +28,6 @@ class OutputModel(BaseModel):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Build pull request impact assessment from metadata and changed files.")
-    parser.add_argument("--owner", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--pr-number", type=int, required=True)
     return parser.parse_args(argv)
 
 
@@ -69,13 +67,11 @@ def _top_counts(counter: Counter[str], limit: int = 8, key_label: str = "name") 
 
 async def main():
     try:
-        cli = parse_args()
-        owner = _coerce_required_string({"owner": cli.owner}, "owner")
-        repo = _coerce_required_string({"repo": cli.repo}, "repo")
-        pr_number = _coerce_required_int({"pr_number": cli.pr_number}, "pr_number")
+        parse_args()
+        owner, repo, pr_number = runtime_context.resolve_pr_identity()
 
-        pr = await asyncio.to_thread(github_tools.get_pull_request, owner, repo, pr_number)
-        files = await asyncio.to_thread(github_tools.list_pull_request_files, owner, repo, pr_number)
+        pr = await asyncio.to_thread(github_tools.get_pull_request)
+        files = await asyncio.to_thread(github_tools.list_pull_request_files)
 
         status_counts: Counter[str] = Counter()
         directory_counts: Counter[str] = Counter()

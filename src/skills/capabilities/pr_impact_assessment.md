@@ -5,20 +5,7 @@ kind: workflow
 order: 6
 execution:
   script_path: skills/workflows/scripts/pr_impact_assessment.py
-  arg_schema:
-    owner:
-      type: string
-      required: true
-      description: Repository owner or organization.
-    repo:
-      type: string
-      required: true
-      description: Repository name.
-    pr_number:
-      type: integer
-      required: true
-      minimum: 1
-      description: Pull request number.
+  arg_schema: {}
 ---
 
 --- list_capabilities ---
@@ -48,7 +35,7 @@ impact aggregates (status mix, directories, extensions, and largest deltas) in o
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "pr_impact_assessment --owner acme --repo checkout --pr-number 123"`
+1. `pr_impact_assessment`
 ### Constraints
 - Returns compact file metadata and impact aggregates, not full patches.
 

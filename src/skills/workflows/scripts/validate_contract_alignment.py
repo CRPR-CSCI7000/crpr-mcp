@@ -2,12 +2,13 @@ import argparse
 import asyncio
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel
 
-from runtime import github_tools, zoekt_tools
+from runtime import context as runtime_context
+from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
 MAX_LINE_WINDOW = 60
@@ -43,13 +44,9 @@ class OutputModel(BaseModel):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Validate contract alignment between source PR provider and cross-repo consumer.")
-    parser.add_argument("--provider-owner", required=True)
-    parser.add_argument("--provider-repo", required=True)
-    parser.add_argument("--provider-pr-number", type=int, required=True)
     parser.add_argument("--provider-path", required=True)
     parser.add_argument("--provider-start-line", type=int, required=True)
     parser.add_argument("--provider-end-line", type=int, required=True)
-    parser.add_argument("--provider-ref-side", choices=("head", "base"), default="head")
     parser.add_argument("--consumer-repo", required=True)
     parser.add_argument("--consumer-path", required=True)
     parser.add_argument("--consumer-start-line", type=int, required=True)
@@ -64,16 +61,6 @@ def _coerce_required_string(payload: dict[str, object], key: str) -> str:
     return value
 
 
-def _coerce_required_int(payload: dict[str, object], key: str) -> int:
-    try:
-        value = int(payload.get(key))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"missing required arg: {key}") from exc
-    if value <= 0:
-        raise ValueError(f"{key} must be > 0")
-    return value
-
-
 def _validate_line_range(start_line: int, end_line: int, label: str) -> None:
     if start_line <= 0 or end_line <= 0:
         raise ValueError(f"{label}_start_line and {label}_end_line must be positive integers")
@@ -82,25 +69,6 @@ def _validate_line_range(start_line: int, end_line: int, label: str) -> None:
     requested_window = end_line - start_line + 1
     if requested_window > MAX_LINE_WINDOW:
         raise ValueError(f"{label} requested line window {requested_window} exceeds max {MAX_LINE_WINDOW}")
-
-
-def _select_line_range(content: str, start_line: int, end_line: int) -> str:
-    lines = content.splitlines()
-    start_index = start_line - 1
-    end_index = min(len(lines), end_line)
-    selected = lines[start_index:end_index] if start_index < len(lines) else []
-    return "\n".join(selected)
-
-
-def _extract_provider_ref(pr_payload: Mapping[str, object], ref_side: str) -> tuple[str, str]:
-    ref_block = pr_payload.get(ref_side)
-    if not isinstance(ref_block, Mapping):
-        raise ValueError(f"pull request payload missing `{ref_side}` block")
-    ref_name = str(ref_block.get("ref", "")).strip()
-    ref_sha = str(ref_block.get("sha", "")).strip()
-    if not ref_sha:
-        raise ValueError(f"pull request payload missing `{ref_side}.sha`")
-    return ref_name, ref_sha
 
 
 def _extract_keys(content: str) -> set[str]:
@@ -280,13 +248,10 @@ def _signal_count(signals: dict[str, list[str]]) -> int:
 async def main():
     try:
         cli = parse_args()
-        provider_owner = _coerce_required_string({"provider_owner": cli.provider_owner}, "provider_owner")
-        provider_repo = _coerce_required_string({"provider_repo": cli.provider_repo}, "provider_repo")
-        provider_pr_number = _coerce_required_int({"provider_pr_number": cli.provider_pr_number}, "provider_pr_number")
+        provider_owner, provider_repo, provider_pr_number = runtime_context.resolve_pr_identity()
         provider_path = _coerce_required_string({"provider_path": cli.provider_path}, "provider_path")
         provider_start_line = int(cli.provider_start_line)
         provider_end_line = int(cli.provider_end_line)
-        provider_ref_side = str(cli.provider_ref_side).strip().lower() or "head"
 
         consumer_repo = _coerce_required_string({"consumer_repo": cli.consumer_repo}, "consumer_repo")
         consumer_path = _coerce_required_string({"consumer_path": cli.consumer_path}, "consumer_path")
@@ -296,19 +261,14 @@ async def main():
         _validate_line_range(provider_start_line, provider_end_line, "provider")
         _validate_line_range(consumer_start_line, consumer_end_line, "consumer")
 
-        pr = await asyncio.to_thread(github_tools.get_pull_request, provider_owner, provider_repo, provider_pr_number)
-        if not isinstance(pr, Mapping):
-            raise ValueError("unexpected pull request payload shape")
-
-        provider_ref_name, provider_ref_sha = _extract_provider_ref(pr, provider_ref_side)
-        provider_full_content = await asyncio.to_thread(
-            github_tools.get_file_content,
-            provider_owner,
-            provider_repo,
+        source_repo_name = f"github.com/{provider_owner}/{provider_repo}"
+        provider_content = await asyncio.to_thread(
+            zoekt_tools.fetch_content,
+            source_repo_name,
             provider_path,
-            provider_ref_sha,
+            provider_start_line,
+            provider_end_line,
         )
-        provider_content = _select_line_range(provider_full_content, provider_start_line, provider_end_line)
         consumer_content = await asyncio.to_thread(
             zoekt_tools.fetch_content,
             consumer_repo,
@@ -357,10 +317,7 @@ async def main():
                 "path": provider_path,
                 "start_line": provider_start_line,
                 "end_line": provider_end_line,
-                "ref_side": provider_ref_side,
-                "ref_name": provider_ref_name,
-                "ref_sha": provider_ref_sha,
-                "evidence_origin": f"github_pr_{provider_ref_side}",
+                "evidence_origin": "zoekt_index_head",
             },
             "consumer": {
                 "repo": consumer_repo,

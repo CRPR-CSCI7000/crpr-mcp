@@ -36,7 +36,7 @@ def test_read_capability_custom_workflow_includes_runtime_helpers(monkeypatch) -
     assert "### Runtime Helpers" in markdown
     assert "runtime.github_tools" in markdown
     assert "runtime.github_get_pull_request" in markdown
-    assert "runtime.github_tools.get_pull_request(owner: str, repo: str, pr_number: int) -> Any" in markdown
+    assert "runtime.github_tools.get_pull_request(" in markdown
     assert "runtime.zoekt_tools.search(query: str" in markdown
 
 
@@ -59,8 +59,8 @@ def test_list_capabilities_emphasizes_read_capability(monkeypatch) -> None:
     assert markdown.count("read_capability") >= 6
     assert "Required args:" not in markdown
     assert "Example:" not in markdown
-    assert "For source PR files (including changed files), use `pr_file_context_reader`." in markdown
-    assert "`file_context_reader` is cross-repo only; source-repo reads are rejected." in markdown
+    assert "Use `file_context_reader` for most source/cross-repo file reads in scoped Zoekt context." in markdown
+    assert "pr_file_context_reader" not in markdown
 
 
 def test_list_capabilities_runtime_helpers_view(monkeypatch) -> None:
@@ -92,7 +92,7 @@ def test_read_capability_symbol_usage_zoekt_first_contract(monkeypatch) -> None:
     )
     assert "Exactly one of `term` or `raw_query` is required." in markdown
     assert (
-        '1. `run_workflow_cli --command "symbol_usage --term addToPantry --repo github.com/acme/ui '
-        '--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5"`' in markdown
+        "1. `symbol_usage --term addToPantry --repo github.com/acme/ui "
+        "--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`" in markdown
     )
     assert "- `attempted_queries`: Field with type `list[object]`." in markdown

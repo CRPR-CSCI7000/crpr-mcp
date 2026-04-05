@@ -46,7 +46,6 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
         "symbol_definition": _render_symbol_search_result,
         "symbol_usage": _render_symbol_usage_result,
         "file_context_reader": _render_file_context_result,
-        "pr_file_context_reader": _render_pr_file_context_result,
         "pr_impact_assessment": _render_pr_impact_assessment_result,
         "pr_cross_repo_overlap_candidates": _render_pr_cross_repo_overlap_candidates_result,
         "validate_contract_alignment": _render_validate_contract_alignment_result,
@@ -173,42 +172,6 @@ def _render_file_context_result(payload: Any) -> list[str]:
     if source_owner and source_repo:
         lines.append(f"- Source PR repo: `{source_owner}/{source_repo}`")
     lines.append("")
-
-    if not content:
-        lines.append("No content returned for the requested range.")
-        return lines
-
-    language = _language_from_path(path)
-    numbered_code = _with_line_numbers(content, start_line=start_line)
-    lines.extend([f"```{language}", numbered_code, "```"])
-    return lines
-
-
-def _render_pr_file_context_result(payload: Any) -> list[str]:
-    if not isinstance(payload, dict):
-        return _render_generic_workflow_result(payload)
-
-    owner = str(payload.get("owner", "")).strip()
-    repo = str(payload.get("repo", "")).strip()
-    pr_number = _coerce_int(payload.get("pr_number"), default=0)
-    path = str(payload.get("path", "")).strip()
-    start_line = _coerce_int(payload.get("start_line"), default=1)
-    end_line = _coerce_int(payload.get("end_line"), default=start_line)
-    content = str(payload.get("content", ""))
-    ref_side = str(payload.get("ref_side", "")).strip() or "head"
-    ref_name = str(payload.get("ref_name", "")).strip()
-    ref_sha = str(payload.get("ref_sha", "")).strip()
-    evidence_origin = str(payload.get("evidence_origin", "")).strip() or f"github_pr_{ref_side}"
-
-    target = f"{owner}/{repo}" if owner and repo else "(unknown repo)"
-    header = f"`{target}` PR `#{pr_number}` `{path}` lines `{start_line}-{end_line}`"
-    lines = [
-        header,
-        f"- Evidence origin: `{evidence_origin}`",
-        f"- Ref side/name: `{ref_side}` / `{ref_name or '(unknown)'}`",
-        f"- Ref SHA: `{ref_sha or '(unknown)'}`",
-        "",
-    ]
 
     if not content:
         lines.append("No content returned for the requested range.")
@@ -477,13 +440,9 @@ def _collect_overlap_candidate_samples(overlap_candidates: list[Any]) -> list[di
 def _alignment_check_command_from_suggestion(check: dict[str, Any]) -> str:
     command_parts = ["validate_contract_alignment"]
     arg_order = [
-        "provider_owner",
-        "provider_repo",
-        "provider_pr_number",
         "provider_path",
         "provider_start_line",
         "provider_end_line",
-        "provider_ref_side",
         "consumer_repo",
         "consumer_path",
         "consumer_start_line",

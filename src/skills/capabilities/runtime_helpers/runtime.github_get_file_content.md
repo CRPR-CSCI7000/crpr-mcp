@@ -5,12 +5,6 @@ order: 8
 execution:
   call: runtime.github_tools.get_file_content
   arg_schema:
-    owner:
-      type: string
-      required: true
-    repo:
-      type: string
-      required: true
     path:
       type: string
       required: true
@@ -34,5 +28,5 @@ execution:
 {{RUNTIME_PARAMETERS}}
 - Examples:
 ```python
-runtime.github_tools.get_file_content(owner='acme', repo='checkout', path='src/service.py', ref='2f4d9d0')
+runtime.github_tools.get_file_content(path='src/service.py', ref='2f4d9d0')
 ```

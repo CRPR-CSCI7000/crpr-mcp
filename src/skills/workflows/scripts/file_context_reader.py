@@ -4,6 +4,7 @@ import json
 
 from pydantic import BaseModel, Field
 
+from runtime import context as runtime_context
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
@@ -13,6 +14,7 @@ MAX_LINE_WINDOW = 60
 class OutputModel(BaseModel):
     source_owner: str
     source_repo: str
+    source_pr_number: int
     repo: str = Field(..., json_schema_extra={"summary_role": "echoed_input"})
     path: str
     start_line: int
@@ -25,8 +27,6 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Read a bounded line range from one non-source repository file via Zoekt."
     )
-    parser.add_argument("--source-owner", required=True)
-    parser.add_argument("--source-repo", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--start-line", type=int, required=True)
@@ -34,45 +34,33 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _normalize_repo_name(value: str) -> str:
-    normalized = value.strip().lower()
+def _normalize_repo(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return normalized
     normalized = normalized.replace("https://", "").replace("http://", "")
-    normalized = normalized.removesuffix(".git")
-    return normalized.strip("/")
-
-
-def _is_source_repo(candidate_repo: str, source_owner: str, source_repo: str) -> bool:
-    normalized_candidate = _normalize_repo_name(candidate_repo)
-    source_name = _normalize_repo_name(f"{source_owner}/{source_repo}")
-    source_variants = {
-        source_name,
-        f"github.com/{source_name}",
-    }
-    return normalized_candidate in source_variants
+    normalized = normalized.removesuffix(".git").strip("/")
+    if normalized.lower().startswith("github.com/"):
+        owner_repo = normalized[len("github.com/") :]
+    else:
+        owner_repo = normalized
+    owner_repo = owner_repo.lower()
+    if "/" not in owner_repo:
+        return owner_repo
+    return f"github.com/{owner_repo}"
 
 
 async def main():
     try:
         cli = parse_args()
-        source_owner = str(cli.source_owner).strip()
-        source_repo = str(cli.source_repo).strip()
-        if not source_owner:
-            raise ValueError("missing required arg: source_owner")
-        if not source_repo:
-            raise ValueError("missing required arg: source_repo")
+        source_owner, source_repo, source_pr_number = runtime_context.resolve_pr_identity()
 
-        repo = str(cli.repo).strip()
+        repo = _normalize_repo(str(cli.repo))
         path = str(cli.path).strip()
         if not repo:
             raise ValueError("missing required arg: repo")
         if not path:
             raise ValueError("missing required arg: path")
-        if _is_source_repo(repo, source_owner, source_repo):
-            raise ValueError(
-                "source repository reads are blocked for Zoekt file_context_reader in PR-scoped mode; "
-                "use pr_file_context_reader for source repo content"
-            )
-
         start_line = int(cli.start_line)
         end_line = int(cli.end_line)
         if start_line <= 0 or end_line <= 0:
@@ -90,6 +78,7 @@ async def main():
         output = {
             "source_owner": source_owner,
             "source_repo": source_repo,
+            "source_pr_number": source_pr_number,
             "repo": repo,
             "path": path,
             "start_line": start_line,

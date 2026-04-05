@@ -6,19 +6,6 @@ order: 8
 execution:
   script_path: skills/workflows/scripts/validate_contract_alignment.py
   arg_schema:
-    provider_owner:
-      type: string
-      required: true
-      description: Source PR owner/org for provider-side reads.
-    provider_repo:
-      type: string
-      required: true
-      description: Source PR repository name for provider-side reads.
-    provider_pr_number:
-      type: integer
-      required: true
-      minimum: 1
-      description: Source pull request number.
     provider_path:
       type: string
       required: true
@@ -33,11 +20,6 @@ execution:
       required: true
       minimum: 1
       description: Provider-side 1-indexed end line.
-    provider_ref_side:
-      type: string
-      required: false
-      default: head
-      description: Source PR ref side (`head` or `base`) for provider reads.
     consumer_repo:
       type: string
       required: true
@@ -75,8 +57,8 @@ execution:
 - `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).
 
 ### Description
-Fetches provider content from the source PR (GitHub head/base SHA) and consumer content from a cross-repo
-indexed file range (Zoekt), then compares extracted keys, parameters, and HTTP signatures.
+Fetches provider content from the source repo and consumer content from a scoped indexed file range
+via Zoekt, then compares extracted keys, parameters, and HTTP signatures.
 Returns structured drift findings with coverage warnings when extraction is sparse.
 
 
@@ -86,9 +68,9 @@ Returns structured drift findings with coverage warnings when extraction is spar
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "validate_contract_alignment --provider-owner acme --provider-repo checkout --provider-pr-number 123 --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --provider-ref-side head --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90"`
+1. `validate_contract_alignment --provider-path api/contracts/order.json --provider-start-line 1 --provider-end-line 60 --consumer-repo github.com/acme/web --consumer-path src/api/orderClient.ts --consumer-start-line 40 --consumer-end-line 90`
 ### Constraints
-- Consumer reads are Zoekt-backed and must target indexed repositories.
+- Provider and consumer reads are Zoekt-backed and must target indexed repositories.
 - Hard limit: each requested line window must be <= 60 lines.
 - Heuristic extraction can be partial; use `coverage_complete` and warnings to calibrate confidence.
 

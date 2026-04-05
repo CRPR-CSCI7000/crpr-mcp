@@ -8,9 +8,6 @@ execution:
     code:
       type: string
       required: true
-    timeout_seconds:
-      type: integer
-      required: false
 ---
 
 --- list_capabilities ---
@@ -40,12 +37,12 @@ plain text, plain JSON, or `__RESULT_JSON__=<json>` marker (optional).
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_custom_workflow_code --code "import json
+1. `run_custom_workflow_code(code="import json
 from runtime import github_tools
 
-pr = github_tools.get_pull_request(\"acme\", \"checkout\", 123)
+pr = github_tools.get_pull_request()
 print(json.dumps({\"title\": pr.get(\"title\", \"\")}, ensure_ascii=True))
-"`
+")`
 ### Constraints
 - Import policy: custom code may import only approved modules from the safety allowlist. Use runtime helpers via `from runtime import zoekt_tools, github_tools`, `import runtime.zoekt_tools as zoekt_tools`, or `import runtime.github_tools as github_tools`.
 

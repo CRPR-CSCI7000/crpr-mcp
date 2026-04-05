@@ -16,6 +16,7 @@ from .safety import validate_custom_workflow_code
 RESULT_MARKER = "__RESULT_JSON__="
 TIMEOUT_EXIT_CODE = 124
 _ENV_ALLOWLIST = {
+    "CRPR_CONTEXT_ID",
     "HOME",
     "LANG",
     "LC_ALL",
@@ -24,8 +25,6 @@ _ENV_ALLOWLIST = {
     "TZ",
     "ZOEKT_API_URL",
 }
-
-
 class ExecutionRunner:
     def __init__(
         self,
@@ -184,12 +183,21 @@ class ExecutionRunner:
             "Use plain quotes, for example: --raw-query 'addToPantry r:checkout'."
         )
 
-    async def run_workflow_cli_command(self, command: str, timeout_seconds: int) -> tuple[str, ExecutionResult]:
+    async def run_workflow_cli_command(
+        self,
+        command: str,
+        timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
+        enforce_timeout: bool = True,
+    ) -> tuple[str, ExecutionResult]:
         workflow_id, args = self.parse_workflow_cli_command(command)
         result = await self.run_workflow_script(
             workflow_id=workflow_id,
             args=args,
             timeout_seconds=timeout_seconds,
+            extra_env=extra_env,
+            enforce_timeout=enforce_timeout,
         )
         return workflow_id, result
 
@@ -198,6 +206,9 @@ class ExecutionRunner:
         workflow_id: str,
         args: dict[str, Any],
         timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
+        enforce_timeout: bool = True,
     ) -> ExecutionResult:
         workflow = self._workflow_index.get(workflow_id)
         if workflow is None:
@@ -224,10 +235,17 @@ class ExecutionRunner:
             shutil.copy2(script_path, temp_script_path)
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
 
-            command = self._build_isolated_command(temp_script_path, args)
+            script_args = self._filter_internal_args_for_script(workflow_id, args, workflow)
+            command = self._build_isolated_command(temp_script_path, script_args)
 
             try:
-                return await self._execute(command=command, cwd=temp_dir, timeout_seconds=timeout_seconds)
+                return await self._execute(
+                    command=command,
+                    cwd=temp_dir,
+                    timeout_seconds=timeout_seconds,
+                    extra_env=extra_env,
+                    enforce_timeout=enforce_timeout,
+                )
             finally:
                 if temp_script_path.exists():
                     temp_script_path.unlink()
@@ -236,6 +254,8 @@ class ExecutionRunner:
         self,
         code: str,
         timeout_seconds: int,
+        *,
+        extra_env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         rejections = validate_custom_workflow_code(code)
         if rejections:
@@ -264,6 +284,8 @@ class ExecutionRunner:
                     timeout_seconds=timeout_seconds,
                     require_result_marker=False,
                     allow_plain_stdout_result=True,
+                    extra_env=extra_env,
+                    enforce_timeout=True,
                 )
             finally:
                 if script_path.exists():
@@ -276,6 +298,8 @@ class ExecutionRunner:
         timeout_seconds: int,
         require_result_marker: bool = True,
         allow_plain_stdout_result: bool = False,
+        extra_env: dict[str, str] | None = None,
+        enforce_timeout: bool = True,
     ) -> ExecutionResult:
         normalized_timeout = self._normalize_timeout(timeout_seconds)
         start = time.monotonic()
@@ -286,25 +310,31 @@ class ExecutionRunner:
                 cwd=str(cwd),
                 env=self._build_environment(
                     github_rpc_url=self.github_rpc_url,
+                    extra_env=extra_env,
                 ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=normalized_timeout)
-            except asyncio.TimeoutError:
-                process.kill()
+            if enforce_timeout:
+                try:
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                        process.communicate(), timeout=normalized_timeout
+                    )
+                except asyncio.TimeoutError:
+                    process.kill()
+                    stdout_bytes, stderr_bytes = await process.communicate()
+                    stdout = self._decode_and_cap(stdout_bytes, self.stdout_max_bytes, "stdout")
+                    stderr = self._decode_and_cap(stderr_bytes, self.stderr_max_bytes, "stderr")
+                    return ExecutionResult(
+                        success=False,
+                        exit_code=TIMEOUT_EXIT_CODE,
+                        stdout=stdout,
+                        stderr=(stderr + "\nexecution timed out" if stderr else "execution timed out"),
+                        timing_ms=self._elapsed_ms(start),
+                    )
+            else:
                 stdout_bytes, stderr_bytes = await process.communicate()
-                stdout = self._decode_and_cap(stdout_bytes, self.stdout_max_bytes, "stdout")
-                stderr = self._decode_and_cap(stderr_bytes, self.stderr_max_bytes, "stderr")
-                return ExecutionResult(
-                    success=False,
-                    exit_code=TIMEOUT_EXIT_CODE,
-                    stdout=stdout,
-                    stderr=(stderr + "\nexecution timed out" if stderr else "execution timed out"),
-                    timing_ms=self._elapsed_ms(start),
-                )
         except Exception as exc:
             return self._error_result(
                 message=f"runner failed to start subprocess: {exc}",
@@ -354,7 +384,9 @@ class ExecutionRunner:
         return None
 
     @staticmethod
-    def _workflow_flag_aliases(arg_schema: dict[str, Any]) -> dict[str, str]:
+    def _workflow_flag_aliases(
+        arg_schema: dict[str, Any],
+    ) -> dict[str, str]:
         aliases: dict[str, str] = {}
         for arg_name in arg_schema.keys():
             if not isinstance(arg_name, str):
@@ -421,7 +453,12 @@ class ExecutionRunner:
         except (TypeError, ValueError):
             return None
 
-    def _build_environment(self, github_rpc_url: str) -> dict[str, str]:
+    def _build_environment(
+        self,
+        github_rpc_url: str,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         env: dict[str, str] = {}
         for key in _ENV_ALLOWLIST:
             value = os.environ.get(key)
@@ -430,7 +467,23 @@ class ExecutionRunner:
         env["CRPR_GITHUB_RPC_URL"] = github_rpc_url
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if extra_env:
+            for key, value in extra_env.items():
+                key_text = str(key).strip()
+                if not key_text:
+                    continue
+                env[key_text] = str(value)
         return env
+
+    @staticmethod
+    def workflow_requires_pr_scope(workflow_id: str) -> bool:
+        return bool(str(workflow_id).strip())
+
+    @staticmethod
+    def _filter_internal_args_for_script(workflow_id: str, args: dict[str, Any], workflow: dict[str, Any]) -> dict[str, Any]:
+        _ = workflow_id
+        _ = workflow
+        return dict(args)
 
     @staticmethod
     def _build_isolated_command(script_path: Path, args: dict[str, Any]) -> list[str]:

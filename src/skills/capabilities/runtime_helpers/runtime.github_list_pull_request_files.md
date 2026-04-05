@@ -4,16 +4,7 @@ doc_type: runtime_helper
 order: 7
 execution:
   call: runtime.github_tools.list_pull_request_files
-  arg_schema:
-    owner:
-      type: string
-      required: true
-    repo:
-      type: string
-      required: true
-    pr_number:
-      type: integer
-      required: true
+  arg_schema: {}
 ---
 
 --- list_capabilities ---
@@ -31,5 +22,7 @@ execution:
 {{RUNTIME_PARAMETERS}}
 - Examples:
 ```python
-runtime.github_tools.list_pull_request_files(owner='acme', repo='checkout', pr_number=123)
+runtime.github_tools.list_pull_request_files()
 ```
+- Notes:
+- Requires thread-scoped PR context (`CRPR_CONTEXT_OWNER`, `CRPR_CONTEXT_REPO`, `CRPR_CONTEXT_PR_NUMBER`) in subprocess env.

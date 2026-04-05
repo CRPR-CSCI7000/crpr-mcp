@@ -8,9 +8,6 @@ execution:
     command:
       type: string
       required: true
-    timeout_seconds:
-      type: integer
-      required: false
 ---
 
 --- list_capabilities ---
@@ -30,15 +27,14 @@ execution:
 - `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).
 
 ### Description
-Execute a prebuilt workflow script via CLI-style command flags and timeout controls.
+Execute a prebuilt workflow script via CLI-style command flags.
 
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `run_workflow_cli --command "symbol_definition --query 'ProcessOrder lang:go'" --timeout-seconds 30`
+1. `run_workflow_cli(command="symbol_definition --query 'ProcessOrder lang:go'")`
 ### Constraints
 - Prefer this before generating custom workflow code.
-- Timeout is capped by server policy.
 
 ### Expected Output Summary
 Returns markdown to the agent; key structured fields in that output include:
