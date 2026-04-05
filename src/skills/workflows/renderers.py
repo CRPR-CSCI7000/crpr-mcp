@@ -1,4 +1,3 @@
-import json
 import pathlib
 from typing import Any, Callable
 
@@ -57,11 +56,6 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
 
     if body:
         lines.extend(["", *body])
-    tracking_summary = _extract_tracking_summary(payload)
-    if tracking_summary:
-        lines.extend(["", "### Run Tracking", *_render_tracking_summary(tracking_summary)])
-        marker_json = json.dumps(tracking_summary, ensure_ascii=True, separators=(",", ":"))
-        lines.extend(["", f"<!--CRPR_RUN_TRACKING:{marker_json}-->"])
     if result.stderr:
         lines.extend(["", "### Stderr", "```text", result.stderr, "```"])
     if result.stdout:
@@ -444,38 +438,6 @@ def _render_validate_contract_alignment_result(payload: Any) -> list[str]:
             confidence = str(finding.get("confidence", "low"))
             lines.append(f"- `{category}` `{kind}`: `{count}` items (`{confidence}` confidence)")
     return lines
-
-
-def _extract_tracking_summary(payload: Any) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return None
-    tracking = payload.get("_crpr_run_tracking")
-    if not isinstance(tracking, dict):
-        return None
-    return tracking
-
-
-def _render_tracking_summary(tracking: dict[str, Any]) -> list[str]:
-    run_id = str(tracking.get("tracking_run_id", "")).strip() or "unknown"
-    workflow_id = str(tracking.get("workflow_id", "")).strip() or "unknown"
-    total_runtime_calls = _coerce_int(tracking.get("total_runtime_calls"), default=0)
-    query_count = _coerce_int(tracking.get("zoekt_or_github_queries_made"), default=0)
-    latency_seconds = float(tracking.get("total_latency_seconds", 0.0) or 0.0)
-
-    breakdown = tracking.get("query_breakdown")
-    zoekt_queries = 0
-    github_queries = 0
-    if isinstance(breakdown, dict):
-        zoekt_queries = _coerce_int(breakdown.get("zoekt"), default=0)
-        github_queries = _coerce_int(breakdown.get("github"), default=0)
-
-    return [
-        f"- Tracking run ID: `{run_id}`",
-        f"- Workflow: `{workflow_id}`",
-        f"- Runtime helper calls: `{total_runtime_calls}`",
-        f"- Zoekt/GitHub queries: `{query_count}` (Zoekt `{zoekt_queries}`, GitHub `{github_queries}`)",
-        f"- Total latency (s): `{latency_seconds:.3f}`",
-    ]
 
 
 def _collect_overlap_candidate_samples(overlap_candidates: list[Any]) -> list[dict[str, Any]]:

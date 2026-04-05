@@ -6,10 +6,8 @@ import shutil
 import sys
 import tempfile
 import time
-from collections import Counter
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from ..skills.registry import SkillRegistry
 from .models import ExecutionResult
@@ -26,9 +24,6 @@ _ENV_ALLOWLIST = {
     "TZ",
     "ZOEKT_API_URL",
 }
-_TRACKING_FILE_ENV = "CRPR_TRACKING_OUTPUT_PATH"
-_TRACKING_RUN_ID_ENV = "CRPR_TRACKING_RUN_ID"
-_TRACKING_WORKFLOW_ID_ENV = "CRPR_TRACKING_WORKFLOW_ID"
 
 
 class ExecutionRunner:
@@ -225,8 +220,6 @@ class ExecutionRunner:
             temp_script_path = temp_dir / "workflow_script.py"
             runtime_src = self.src_root / "runtime"
             runtime_dst = temp_dir / "runtime"
-            tracking_path = temp_dir / "runtime_tracking.jsonl"
-            tracking_run_id = uuid4().hex
 
             shutil.copy2(script_path, temp_script_path)
             shutil.copytree(runtime_src, runtime_dst, dirs_exist_ok=True)
@@ -234,22 +227,7 @@ class ExecutionRunner:
             command = self._build_isolated_command(temp_script_path, args)
 
             try:
-                result = await self._execute(
-                    command=command,
-                    cwd=temp_dir,
-                    timeout_seconds=timeout_seconds,
-                    extra_env={
-                        _TRACKING_FILE_ENV: str(tracking_path),
-                        _TRACKING_RUN_ID_ENV: tracking_run_id,
-                        _TRACKING_WORKFLOW_ID_ENV: workflow_id,
-                    },
-                )
-                return self._attach_tracking_summary(
-                    result=result,
-                    workflow_id=workflow_id,
-                    tracking_run_id=tracking_run_id,
-                    tracking_path=tracking_path,
-                )
+                return await self._execute(command=command, cwd=temp_dir, timeout_seconds=timeout_seconds)
             finally:
                 if temp_script_path.exists():
                     temp_script_path.unlink()
@@ -286,7 +264,6 @@ class ExecutionRunner:
                     timeout_seconds=timeout_seconds,
                     require_result_marker=False,
                     allow_plain_stdout_result=True,
-                    extra_env=None,
                 )
             finally:
                 if script_path.exists():
@@ -299,7 +276,6 @@ class ExecutionRunner:
         timeout_seconds: int,
         require_result_marker: bool = True,
         allow_plain_stdout_result: bool = False,
-        extra_env: dict[str, str] | None = None,
     ) -> ExecutionResult:
         normalized_timeout = self._normalize_timeout(timeout_seconds)
         start = time.monotonic()
@@ -310,7 +286,6 @@ class ExecutionRunner:
                 cwd=str(cwd),
                 env=self._build_environment(
                     github_rpc_url=self.github_rpc_url,
-                    extra_env=extra_env,
                 ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -446,7 +421,7 @@ class ExecutionRunner:
         except (TypeError, ValueError):
             return None
 
-    def _build_environment(self, github_rpc_url: str, extra_env: dict[str, str] | None = None) -> dict[str, str]:
+    def _build_environment(self, github_rpc_url: str) -> dict[str, str]:
         env: dict[str, str] = {}
         for key in _ENV_ALLOWLIST:
             value = os.environ.get(key)
@@ -455,72 +430,7 @@ class ExecutionRunner:
         env["CRPR_GITHUB_RPC_URL"] = github_rpc_url
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        if extra_env:
-            for key, value in extra_env.items():
-                if value:
-                    env[str(key)] = str(value)
         return env
-
-    def _attach_tracking_summary(
-        self,
-        *,
-        result: ExecutionResult,
-        workflow_id: str,
-        tracking_run_id: str,
-        tracking_path: Path,
-    ) -> ExecutionResult:
-        events = self._read_tracking_events(tracking_path)
-        runtime_calls = [event for event in events if str(event.get("event_type")) == "runtime_call"]
-        call_breakdown = Counter(str(event.get("system", "unknown")) for event in runtime_calls)
-        query_calls = [event for event in runtime_calls if bool(event.get("is_query"))]
-        query_breakdown = Counter(str(event.get("system", "unknown")) for event in query_calls)
-
-        tracking_summary: dict[str, Any] = {
-            "tracking_run_id": tracking_run_id,
-            "workflow_id": workflow_id,
-            "total_runtime_calls": len(runtime_calls),
-            "zoekt_or_github_queries_made": len(query_calls),
-            "query_breakdown": {
-                "zoekt": int(query_breakdown.get("zoekt", 0)),
-                "github": int(query_breakdown.get("github", 0)),
-            },
-            "call_breakdown": {
-                "zoekt": int(call_breakdown.get("zoekt", 0)),
-                "github": int(call_breakdown.get("github", 0)),
-            },
-            "total_latency_seconds": round(max(result.timing_ms, 0) / 1000.0, 3),
-        }
-
-        payload = result.result_json
-        if isinstance(payload, dict):
-            merged_payload = dict(payload)
-            merged_payload["_crpr_run_tracking"] = tracking_summary
-        else:
-            merged_payload = {
-                "output": payload,
-                "_crpr_run_tracking": tracking_summary,
-            }
-        return result.model_copy(update={"result_json": merged_payload})
-
-    @staticmethod
-    def _read_tracking_events(path: Path) -> list[dict[str, Any]]:
-        if not path.exists():
-            return []
-        events: list[dict[str, Any]] = []
-        try:
-            for raw_line in path.read_text(encoding="utf-8").splitlines():
-                line = raw_line.strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(payload, dict):
-                    events.append(payload)
-        except Exception:
-            return []
-        return events
 
     @staticmethod
     def _build_isolated_command(script_path: Path, args: dict[str, Any]) -> list[str]:

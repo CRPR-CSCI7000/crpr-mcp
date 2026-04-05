@@ -4,7 +4,6 @@ import re
 from typing import Any
 
 import requests
-from runtime.tracking import record_runtime_call
 
 DEFAULT_SEARCH_LIMIT = 10
 DEFAULT_CONTEXT_LINES = 5
@@ -138,52 +137,22 @@ def _get_runtime() -> ZoektRuntime:
 
 
 def search(query: str, limit: int = DEFAULT_SEARCH_LIMIT, context_lines: int = DEFAULT_CONTEXT_LINES) -> list[dict[str, Any]]:
-    record_runtime_call(
-        system="zoekt",
-        operation="search",
-        is_query=True,
-        metadata={"limit": int(limit), "context_lines": int(context_lines)},
-    )
     return _get_runtime().search(query=query, limit=limit, context_lines=context_lines)
 
 
 def search_symbols(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> list[dict[str, Any]]:
-    record_runtime_call(
-        system="zoekt",
-        operation="search_symbols",
-        is_query=True,
-        metadata={"limit": int(limit)},
-    )
     return _get_runtime().search_symbols(query=query, limit=limit)
 
 
 def fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
-    record_runtime_call(
-        system="zoekt",
-        operation="fetch_content",
-        is_query=True,
-        metadata={
-            "repo": _clean_repository_path(repo),
-            "path": path,
-            "start_line": int(start_line),
-            "end_line": int(end_line),
-        },
-    )
     return _get_runtime().fetch_content(repo=repo, path=path, start_line=start_line, end_line=end_line)
 
 
 def list_dir(repo: str, path: str = "", depth: int = 2) -> str:
-    record_runtime_call(
-        system="zoekt",
-        operation="list_dir",
-        is_query=True,
-        metadata={"repo": _clean_repository_path(repo), "path": path, "depth": int(depth)},
-    )
     return _get_runtime().list_dir(repo=repo, path=path, depth=depth)
 
 
 def list_repos() -> list[str]:
-    record_runtime_call(system="zoekt", operation="list_repos", is_query=True)
     return _get_runtime().list_repos()
 
 
