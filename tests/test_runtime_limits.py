@@ -102,12 +102,12 @@ def test_list_repos_posts_context_id_when_available(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("CRPR_CONTEXT_ID", "ctx_abc")
     runtime = ZoektRuntime(base_url="http://zoekt")
     response = Mock()
-    response.json.return_value = {"List": {"Repos": []}}
+    response.json.return_value = {"List": {"Repos": [{"Repository": {"Name": "github.com/acme/checkout"}}]}}
 
     with patch("runtime.zoekt_tools.requests.post", return_value=response) as mock_post:
         repos = runtime.list_repos()
 
-    assert repos == []
+    assert repos == ["github.com/acme/checkout"]
     assert mock_post.call_count == 1
     called_kwargs = mock_post.call_args.kwargs
     assert called_kwargs["json"]["context_id"] == "ctx_abc"

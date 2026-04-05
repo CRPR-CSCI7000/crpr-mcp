@@ -204,6 +204,41 @@ def test_pr_cross_repo_overlap_candidates_filters_generic_terms(monkeypatch, cap
     assert "endpoint_method_route_validation" in payload["required_followup_angles"]
 
 
+def test_pr_cross_repo_overlap_candidates_uses_repo_name_lexical_fallback(monkeypatch, capsys) -> None:
+    module = _load_script_module("pr_cross_repo_overlap_candidates.py")
+    _set_cli_args(module, monkeypatch, {"owner": "acme", "repo": "pantry_pal_api_TEST", "pr_number": 12})
+
+    monkeypatch.setattr(
+        module.github_tools,
+        "list_pull_request_files",
+        lambda: [{"filename": "src/server.py"}],
+    )
+    monkeypatch.setattr(module.zoekt_tools, "list_repos", lambda: ["github.com/acme/pantry_pal_ui_library_test"])
+
+    def fake_search(query: str, limit: int, context_lines: int) -> list[dict[str, object]]:
+        if "type:repo pantry_pal" in query:
+            return [
+                {
+                    "repository": "github.com/acme/pantry_pal_ui_library_test",
+                    "filename": "README.md",
+                    "matches": [{"line_number": 1, "text": "README.md"}],
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(module.zoekt_tools, "search", fake_search)
+
+    exit_code = asyncio.run(module.main())
+    captured = capsys.readouterr()
+    payload = _parse_result_payload(module, captured.out)
+
+    assert exit_code == 0
+    assert "pantry_pal" in [str(term).lower() for term in payload["search_terms"]]
+    assert payload["overlap_candidates"]
+    first_match = payload["overlap_candidates"][0]["term_matches"][0]
+    assert first_match["match_mode"] == "repo_name"
+
+
 def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence_and_suggests_alignment_checks(
     monkeypatch, capsys
 ) -> None:

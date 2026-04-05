@@ -152,8 +152,33 @@ def _is_specific_term(term: str) -> bool:
     return normalized not in _GENERIC_TERM_BLACKLIST
 
 
-def _build_search_terms(files: list[dict[str, object]], limit: int = 12) -> list[str]:
+def _build_repo_seed_terms(repo_name: str) -> list[str]:
+    normalized = repo_name.strip().lower()
+    if not normalized:
+        return []
+
+    parts = [part for part in re.split(r"[^a-z0-9]+", normalized) if part]
     ordered = OrderedDict()
+    for part in parts:
+        ordered[part] = None
+    if len(parts) >= 2:
+        for start in range(len(parts)):
+            for width in (2, 3):
+                end = start + width
+                if end > len(parts):
+                    continue
+                joined = "_".join(parts[start:end])
+                if joined:
+                    ordered[joined] = None
+    return list(ordered.keys())
+
+
+def _build_search_terms(files: list[dict[str, object]], source_repo: str, limit: int = 12) -> list[str]:
+    ordered = OrderedDict()
+    for seeded in _build_repo_seed_terms(source_repo):
+        if _is_specific_term(seeded):
+            ordered[seeded] = None
+
     for file_info in files:
         filename = str(file_info.get("filename", "")).strip()
         if not filename:
@@ -368,7 +393,7 @@ async def main():
             for file_info in files
             if str(file_info.get("filename", "")).strip()
         ]
-        search_terms = _build_search_terms(files)
+        search_terms = _build_search_terms(files, source_repo=repo)
 
         indexed_repos = await asyncio.to_thread(zoekt_tools.list_repos)
         excluded_source_repos: list[str] = []
@@ -394,6 +419,15 @@ async def main():
                 except Exception as exc:
                     errors.append({"repo": indexed_repo, "term": term, "error": str(exc)})
                     continue
+                match_mode = "content"
+                if not results:
+                    repo_name_query = f"r:{indexed_repo} type:repo {term}"
+                    try:
+                        results = await asyncio.to_thread(zoekt_tools.search, repo_name_query, per_term_limit, 0)
+                    except Exception as exc:
+                        errors.append({"repo": indexed_repo, "term": term, "error": str(exc)})
+                        continue
+                    match_mode = "repo_name"
                 if not results:
                     continue
                 hit_count = len(results)
@@ -402,6 +436,7 @@ async def main():
                     {
                         "term": term,
                         "hits": hit_count,
+                        "match_mode": match_mode,
                         "samples": results[:2],
                     }
                 )
