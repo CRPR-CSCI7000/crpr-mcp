@@ -263,11 +263,20 @@ class CrprMCPServer:
             pr_identity = self._resolve_thread_pr_identity_from_headers()
             if pr_identity is not None:
                 owner, repo, pr_number = pr_identity
+                resolved_context = await self.context_lifecycle.ensure_pr_context(
+                    owner=owner,
+                    repo=repo,
+                    pr_number=pr_number,
+                    wait=True,
+                )
                 extra_env.update(
                     {
-                        "CRPR_CONTEXT_OWNER": owner,
-                        "CRPR_CONTEXT_REPO": repo,
-                        "CRPR_CONTEXT_PR_NUMBER": str(pr_number),
+                        "CRPR_CONTEXT_ID": resolved_context.context_id,
+                        "CRPR_CONTEXT_OWNER": resolved_context.owner,
+                        "CRPR_CONTEXT_REPO": resolved_context.repo,
+                        "CRPR_CONTEXT_PR_NUMBER": str(resolved_context.pr_number),
+                        "CRPR_CONTEXT_ANCHOR_CREATED_AT": resolved_context.anchor_created_at,
+                        "CRPR_CONTEXT_MANIFEST_PATH": resolved_context.manifest_path,
                     }
                 )
             result = await self.execution_runner.run_custom_workflow_code(
@@ -276,6 +285,11 @@ class CrprMCPServer:
                 extra_env=extra_env or None,
             )
             return self._format_execution_result_markdown("Custom Workflow Code Execution", result)
+        except ContextLifecycleError as exc:
+            return self._format_execution_result_markdown(
+                "Custom Workflow Code Execution",
+                self._error_execution_result(f"context resolution failed: {exc}"),
+            )
         except Exception as exc:
             logger.exception("run_custom_workflow_code internal exception")
             return self._format_execution_result_markdown(

@@ -172,21 +172,42 @@ def test_run_custom_workflow_code_injects_thread_scope_env_from_headers(
         },
     )
 
+    call_order: list[str] = []
+
+    async def fake_ensure(owner: str, repo: str, pr_number: int, wait: bool = True) -> ResolvedContext:
+        call_order.append("ensure")
+        assert owner == "acme"
+        assert repo == "checkout"
+        assert pr_number == 12
+        assert wait is True
+        return ResolvedContext(
+            context_id="ctx_123",
+            owner=owner,
+            repo=repo,
+            pr_number=pr_number,
+            anchor_created_at="2026-03-30T00:00:00+00:00",
+            manifest_path="/tmp/manifest.json",
+        )
+
     async def fake_run_custom(
         code: str,
         timeout_seconds: int,
         *,
         extra_env: dict[str, str] | None = None,
     ) -> ExecutionResult:
+        call_order.append("run")
         assert timeout_seconds == 60
         assert extra_env is not None
+        assert extra_env["CRPR_CONTEXT_ID"] == "ctx_123"
         assert extra_env["CRPR_CONTEXT_OWNER"] == "acme"
         assert extra_env["CRPR_CONTEXT_REPO"] == "checkout"
         assert extra_env["CRPR_CONTEXT_PR_NUMBER"] == "12"
         return ExecutionResult(success=True, exit_code=0, result_json={"ok": True})
 
+    monkeypatch.setattr(server.context_lifecycle, "ensure_pr_context", fake_ensure)
     monkeypatch.setattr(server.execution_runner, "run_custom_workflow_code", fake_run_custom)
 
     markdown = asyncio.run(server.run_custom_workflow_code(code="print('ok')"))
 
+    assert call_order == ["ensure", "run"]
     assert "Process status: `success`" in markdown
