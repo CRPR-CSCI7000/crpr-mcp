@@ -86,7 +86,7 @@ Exactly one of `term` or `raw_query` is required.
 - Exactly one of `term` or `raw_query` is required.
 - Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).
 - For definitions use `symbol_definition` instead.
-- Prefer this workflow to narrow targets before `pr_file_context_reader` or `file_context_reader`.
+- Prefer this workflow to narrow targets before `file_context_reader`.
 - `context_lines` is hard-limited to 10.
 
 ### Expected Output Summary

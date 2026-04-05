@@ -9,7 +9,7 @@ execution:
     repo:
       type: string
       required: true
-      description: Target repository identifier (must not equal source repo).
+      description: Target repository identifier in Zoekt context scope.
     path:
       type: string
       required: true
@@ -28,9 +28,8 @@ execution:
 
 --- list_capabilities ---
 - Kind: `workflow`
-- Summary: Read a bounded line window from a non-source repository file (never source PR files).
-- When to use: Use only after you identify a specific non-source repo file to inspect; never use for source PR files or changed-file validation.
-- Scope warning: never use this for source PR repository files; use `pr_file_context_reader`.
+- Summary: Read a bounded line window from any repository file in the scoped Zoekt context.
+- When to use: Use after you identify a specific source or cross-repo file path to inspect in the PR-scoped snapshot.
 - Next step: `read_capability(capability_id="file_context_reader")`
 - Interface details intentionally omitted here; use `read_capability`.
 
@@ -44,8 +43,8 @@ execution:
 - `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).
 
 ### Description
-Reads a specific line range from a file in a non-source repository via Zoekt.
-In PR-scoped analysis this workflow is cross-repo only; source repository reads are rejected.
+Reads a specific line range from a file via Zoekt using the active PR-scoped context.
+Works for both source-repo and cross-repo files present in the context snapshot.
 
 
 ### Arg Usage
@@ -56,7 +55,6 @@ In PR-scoped analysis this workflow is cross-repo only; source repository reads 
 ### Examples
 1. `file_context_reader --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85`
 ### Constraints
-- Source-repo reads are blocked; use `pr_file_context_reader` for source PR repository content.
 - Requires a file path, not a directory.
 - Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines.
 - Prefer iterative narrow reads over broad file grabs.

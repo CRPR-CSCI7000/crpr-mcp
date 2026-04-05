@@ -295,9 +295,6 @@ def _first_sample_line(sample: Mapping[str, object]) -> int:
 
 
 def _build_suggested_alignment_checks(
-    owner: str,
-    repo: str,
-    pr_number: int,
     changed_filenames: list[str],
     overlap_candidates: list[dict[str, object]],
     limit: int = 12,
@@ -342,13 +339,9 @@ def _build_suggested_alignment_checks(
                 suggestions.append(
                     {
                         "term": term,
-                        "provider_owner": owner,
-                        "provider_repo": repo,
-                        "provider_pr_number": pr_number,
                         "provider_path": provider_path,
                         "provider_start_line": 1,
                         "provider_end_line": 60,
-                        "provider_ref_side": "head",
                         "consumer_repo": consumer_repo,
                         "consumer_path": consumer_path,
                         "consumer_start_line": consumer_start_line,
@@ -458,9 +451,6 @@ async def main():
                 "downstream_payload_mapping_validation",
             ],
             "suggested_alignment_checks": _build_suggested_alignment_checks(
-                owner=owner,
-                repo=repo,
-                pr_number=pr_number,
                 changed_filenames=changed_filenames,
                 overlap_candidates=overlap_candidates,
             ),

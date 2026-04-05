@@ -92,12 +92,12 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
     assert "narrow range and retry" in captured.out
 
 
-def test_file_context_reader_rejects_source_repo_reads(monkeypatch, capsys) -> None:
+def test_file_context_reader_allows_source_repo_reads(monkeypatch, capsys) -> None:
     called = {"fetch_content": False}
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
         called["fetch_content"] = True
-        return "unused"
+        return "source line"
 
     _set_cli_args(
         monkeypatch,
@@ -114,8 +114,7 @@ def test_file_context_reader_rejects_source_repo_reads(monkeypatch, capsys) -> N
     monkeypatch.setattr(file_context_reader.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(file_context_reader.main())
-    captured = capsys.readouterr()
+    _ = capsys.readouterr()
 
-    assert exit_code == 1
-    assert called["fetch_content"] is False
-    assert "source repository reads are blocked" in captured.out
+    assert exit_code == 0
+    assert called["fetch_content"] is True

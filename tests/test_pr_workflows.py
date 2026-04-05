@@ -242,8 +242,7 @@ def test_pr_cross_repo_overlap_candidates_confirms_contract_evidence_and_suggest
     assert payload["validation_summary"]["confirmed_conflict_count"] == 1
     assert payload["suggested_alignment_checks"]
     first = payload["suggested_alignment_checks"][0]
-    assert first["provider_owner"] == "acme"
-    assert first["provider_repo"] == "checkout"
-    assert first["provider_pr_number"] == 12
-    assert first["provider_ref_side"] == "head"
+    assert first["provider_path"] == "api/payment_contract.proto"
+    assert first["provider_start_line"] == 1
+    assert first["provider_end_line"] == 60
     assert first["consumer_repo"] == "github.com/acme/inventory"

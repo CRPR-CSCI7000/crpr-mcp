@@ -48,7 +48,6 @@ def _default_cli_args() -> dict[str, object]:
         "provider_path": "api/orders.py",
         "provider_start_line": 1,
         "provider_end_line": 60,
-        "provider_ref_side": "head",
         "consumer_repo": "github.com/acme/web",
         "consumer_path": "src/api/orders.ts",
         "consumer_start_line": 1,
@@ -71,21 +70,12 @@ const submitOrder = async function(orderId, customerId) {
 }
 """.strip()
 
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_pull_request",
-        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
-    )
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_file_content",
-        lambda path, ref: provider_content,
-    )
-    monkeypatch.setattr(
-        module.zoekt_tools,
-        "fetch_content",
-        lambda repo, path, start_line, end_line: consumer_content,
-    )
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        if repo == "github.com/acme/checkout":
+            return provider_content
+        return consumer_content
+
+    monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(module.main())
     captured = capsys.readouterr()
@@ -98,6 +88,7 @@ const submitOrder = async function(orderId, customerId) {
     assert "order_id" in payload["alignment"]["keys"]["shared"]
     assert "POST /v1/orders" in payload["alignment"]["http_signatures"]["shared"]
     assert payload["warnings"] == []
+    assert payload["provider"]["evidence_origin"] == "zoekt_index_head"
 
 
 def test_validate_contract_alignment_detects_provider_only_drift(monkeypatch, capsys) -> None:
@@ -115,21 +106,12 @@ const submitOrder = async function(orderId, customerId) {
 }
 """.strip()
 
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_pull_request",
-        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
-    )
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_file_content",
-        lambda path, ref: provider_content,
-    )
-    monkeypatch.setattr(
-        module.zoekt_tools,
-        "fetch_content",
-        lambda repo, path, start_line, end_line: consumer_content,
-    )
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        if repo == "github.com/acme/checkout":
+            return provider_content
+        return consumer_content
+
+    monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(module.main())
     captured = capsys.readouterr()
@@ -145,21 +127,12 @@ def test_validate_contract_alignment_returns_partial_coverage_with_warnings(monk
     module = _load_script_module("validate_contract_alignment.py")
     _set_cli_args(module, monkeypatch, _default_cli_args())
 
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_pull_request",
-        lambda: {"head": {"ref": "feature/orders", "sha": "abc123"}},
-    )
-    monkeypatch.setattr(
-        module.github_tools,
-        "get_file_content",
-        lambda path, ref: "# notes only",
-    )
-    monkeypatch.setattr(
-        module.zoekt_tools,
-        "fetch_content",
-        lambda repo, path, start_line, end_line: "// no contract content",
-    )
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        if repo == "github.com/acme/checkout":
+            return "# notes only"
+        return "// no contract content"
+
+    monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(module.main())
     captured = capsys.readouterr()

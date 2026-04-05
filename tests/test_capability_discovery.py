@@ -59,8 +59,8 @@ def test_list_capabilities_emphasizes_read_capability(monkeypatch) -> None:
     assert markdown.count("read_capability") >= 6
     assert "Required args:" not in markdown
     assert "Example:" not in markdown
-    assert "For source PR files (including changed files), use `pr_file_context_reader`." in markdown
-    assert "`file_context_reader` is cross-repo only; source-repo reads are rejected." in markdown
+    assert "Use `file_context_reader` for most source/cross-repo file reads in scoped Zoekt context." in markdown
+    assert "pr_file_context_reader" not in markdown
 
 
 def test_list_capabilities_runtime_helpers_view(monkeypatch) -> None:

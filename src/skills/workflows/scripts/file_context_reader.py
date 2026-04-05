@@ -34,23 +34,6 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _normalize_repo_name(value: str) -> str:
-    normalized = value.strip().lower()
-    normalized = normalized.replace("https://", "").replace("http://", "")
-    normalized = normalized.removesuffix(".git")
-    return normalized.strip("/")
-
-
-def _is_source_repo(candidate_repo: str, source_owner: str, source_repo: str) -> bool:
-    normalized_candidate = _normalize_repo_name(candidate_repo)
-    source_name = _normalize_repo_name(f"{source_owner}/{source_repo}")
-    source_variants = {
-        source_name,
-        f"github.com/{source_name}",
-    }
-    return normalized_candidate in source_variants
-
-
 async def main():
     try:
         cli = parse_args()
@@ -62,12 +45,6 @@ async def main():
             raise ValueError("missing required arg: repo")
         if not path:
             raise ValueError("missing required arg: path")
-        if _is_source_repo(repo, source_owner, source_repo):
-            raise ValueError(
-                "source repository reads are blocked for Zoekt file_context_reader in PR-scoped mode; "
-                "use pr_file_context_reader for source repo content"
-            )
-
         start_line = int(cli.start_line)
         end_line = int(cli.end_line)
         if start_line <= 0 or end_line <= 0:
