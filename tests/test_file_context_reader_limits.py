@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -34,6 +35,14 @@ def _set_cli_args(monkeypatch, payload: dict[str, object]) -> None:
     monkeypatch.setattr(file_context_reader, "parse_args", lambda argv_override=None: original_parse_args(argv))
 
 
+def _parse_result_payload(stdout: str) -> dict:
+    marker = file_context_reader.RESULT_MARKER
+    for line in stdout.splitlines():
+        if line.startswith(marker):
+            return json.loads(line[len(marker) :])
+    raise AssertionError("result marker not found in stdout")
+
+
 def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> None:
     call_log: list[tuple[str, str, int, int]] = []
 
@@ -57,18 +66,19 @@ def test_file_context_reader_allows_window_of_60_lines(monkeypatch, capsys) -> N
 
     exit_code = asyncio.run(file_context_reader.main())
     captured = capsys.readouterr()
+    payload = _parse_result_payload(captured.out)
 
     assert exit_code == 0
     assert call_log == [("github.com/org/repo", "src/main.go", 1, 60)]
-    assert file_context_reader.RESULT_MARKER in captured.out
+    assert payload["warnings"] == []
 
 
-def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) -> None:
-    called = {"fetch_content": False}
+def test_file_context_reader_clamps_window_above_max(monkeypatch, capsys) -> None:
+    call_log: list[tuple[str, str, int, int]] = []
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
-        called["fetch_content"] = True
-        return "unused"
+        call_log.append((repo, path, start_line, end_line))
+        return "line content"
 
     _set_cli_args(
         monkeypatch,
@@ -79,17 +89,19 @@ def test_file_context_reader_rejects_window_above_60_lines(monkeypatch, capsys) 
             "repo": "github.com/org/repo",
             "path": "src/main.go",
             "start_line": 1,
-            "end_line": 61,
+            "end_line": 66,
         },
     )
     monkeypatch.setattr(file_context_reader.zoekt_tools, "fetch_content", fake_fetch_content)
 
     exit_code = asyncio.run(file_context_reader.main())
     captured = capsys.readouterr()
+    payload = _parse_result_payload(captured.out)
 
-    assert exit_code == 1
-    assert called["fetch_content"] is False
-    assert "narrow range and retry" in captured.out
+    assert exit_code == 0
+    assert call_log == [("github.com/org/repo", "src/main.go", 1, 60)]
+    assert payload["end_line"] == 60
+    assert any("clamped" in warning for warning in payload["warnings"])
 
 
 def test_file_context_reader_allows_source_repo_reads(monkeypatch, capsys) -> None:

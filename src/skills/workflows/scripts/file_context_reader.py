@@ -8,7 +8,6 @@ from runtime import context as runtime_context
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
-MAX_LINE_WINDOW = 60
 
 
 class OutputModel(BaseModel):
@@ -21,6 +20,7 @@ class OutputModel(BaseModel):
     end_line: int
     content: str
     evidence_origin: str
+    warnings: list[str]
 
 
 def parse_args(argv=None):
@@ -63,15 +63,11 @@ async def main():
             raise ValueError("missing required arg: path")
         start_line = int(cli.start_line)
         end_line = int(cli.end_line)
-        if start_line <= 0 or end_line <= 0:
-            raise ValueError("start_line and end_line must be positive integers")
-        if end_line < start_line:
-            raise ValueError("end_line must be >= start_line")
-        requested_window = end_line - start_line + 1
-        if requested_window > MAX_LINE_WINDOW:
-            raise ValueError(
-                f"requested line window {requested_window} exceeds max {MAX_LINE_WINDOW}; narrow range and retry"
-            )
+        warnings: list[str] = []
+        max_end = start_line + zoekt_tools.MAX_FETCH_WINDOW_LINES - 1
+        if end_line > max_end:
+            warnings.append(f"line window clamped from {end_line - start_line + 1} to {zoekt_tools.MAX_FETCH_WINDOW_LINES}")
+            end_line = max_end
 
         content = await asyncio.to_thread(zoekt_tools.fetch_content, repo, path, start_line, end_line)
 
@@ -85,6 +81,7 @@ async def main():
             "end_line": end_line,
             "content": content,
             "evidence_origin": "zoekt_index",
+            "warnings": warnings,
         }
         OutputModel.model_validate(output)
         print(RESULT_MARKER + json.dumps(output, ensure_ascii=True))

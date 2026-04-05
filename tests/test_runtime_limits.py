@@ -49,18 +49,24 @@ def test_search_includes_context_id_when_available(monkeypatch: pytest.MonkeyPat
     assert called_kwargs["params"]["context_id"] == "ctx_abc"
 
 
-def test_fetch_content_rejects_line_windows_above_max() -> None:
+def test_fetch_content_clamps_line_windows_above_max() -> None:
     runtime = ZoektRuntime(base_url="http://zoekt")
+    requested_window = MAX_FETCH_WINDOW_LINES + 6
+    lines = [f"line-{index}" for index in range(1, requested_window + 2)]
+    response = Mock()
+    response.text = _html_with_inline_pre(lines)
 
-    with patch("runtime.zoekt_tools.requests.get") as mock_get:
-        with pytest.raises(ZoektRuntimeError, match=f"max {MAX_FETCH_WINDOW_LINES}"):
-            runtime.fetch_content(
-                repo="github.com/org/repo",
-                path="src/main.go",
-                start_line=1,
-                end_line=MAX_FETCH_WINDOW_LINES + 1,
-            )
-        mock_get.assert_not_called()
+    with patch("runtime.zoekt_tools.requests.get", return_value=response) as mock_get:
+        content = runtime.fetch_content(
+            repo="github.com/org/repo",
+            path="src/main.go",
+            start_line=1,
+            end_line=requested_window,
+        )
+
+    expected = "\n".join(lines[:MAX_FETCH_WINDOW_LINES])
+    assert content == expected
+    assert mock_get.call_count == 1
 
 
 def test_fetch_content_allows_window_at_max() -> None:

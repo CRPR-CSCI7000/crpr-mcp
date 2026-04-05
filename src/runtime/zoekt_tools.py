@@ -52,11 +52,7 @@ class ZoektRuntime:
         if start_line <= 0 or end_line <= 0 or end_line < start_line:
             raise ZoektRuntimeError("invalid line range")
 
-        requested_window = end_line - start_line + 1
-        if requested_window > MAX_FETCH_WINDOW_LINES:
-            raise ZoektRuntimeError(
-                f"line window too large: requested {requested_window} lines, max {MAX_FETCH_WINDOW_LINES}; narrow range and retry"
-            )
+        end_line = min(end_line, start_line + MAX_FETCH_WINDOW_LINES - 1)
 
         params = {
             "r": _clean_repository_path(repo),

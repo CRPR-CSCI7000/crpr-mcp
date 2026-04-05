@@ -11,7 +11,6 @@ from runtime import context as runtime_context
 from runtime import zoekt_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
-MAX_LINE_WINDOW = 60
 _GENERIC_PARAM_NAMES = {
     "self",
     "cls",
@@ -61,14 +60,24 @@ def _coerce_required_string(payload: dict[str, object], key: str) -> str:
     return value
 
 
-def _validate_line_range(start_line: int, end_line: int, label: str) -> None:
-    if start_line <= 0 or end_line <= 0:
-        raise ValueError(f"{label}_start_line and {label}_end_line must be positive integers")
-    if end_line < start_line:
-        raise ValueError(f"{label}_end_line must be >= {label}_start_line")
-    requested_window = end_line - start_line + 1
-    if requested_window > MAX_LINE_WINDOW:
-        raise ValueError(f"{label} requested line window {requested_window} exceeds max {MAX_LINE_WINDOW}")
+def _fetch_side(
+    repo: str,
+    path: str,
+    start_line: int,
+    end_line: int,
+    label: str,
+    warnings: list[str],
+) -> tuple[str, int, int]:
+    max_end = start_line + zoekt_tools.MAX_FETCH_WINDOW_LINES - 1
+    if end_line > max_end:
+        warnings.append(f"{label} line window clamped from {end_line - start_line + 1} to {zoekt_tools.MAX_FETCH_WINDOW_LINES}")
+        end_line = max_end
+    try:
+        content = zoekt_tools.fetch_content(repo, path, start_line, end_line)
+    except Exception as exc:
+        warnings.append(f"{label} content fetch failed: {exc}")
+        content = ""
+    return content, start_line, end_line
 
 
 def _extract_keys(content: str) -> set[str]:
@@ -250,31 +259,18 @@ async def main():
         cli = parse_args()
         provider_owner, provider_repo, provider_pr_number = runtime_context.resolve_pr_identity()
         provider_path = _coerce_required_string({"provider_path": cli.provider_path}, "provider_path")
-        provider_start_line = int(cli.provider_start_line)
-        provider_end_line = int(cli.provider_end_line)
-
         consumer_repo = _coerce_required_string({"consumer_repo": cli.consumer_repo}, "consumer_repo")
         consumer_path = _coerce_required_string({"consumer_path": cli.consumer_path}, "consumer_path")
-        consumer_start_line = int(cli.consumer_start_line)
-        consumer_end_line = int(cli.consumer_end_line)
 
-        _validate_line_range(provider_start_line, provider_end_line, "provider")
-        _validate_line_range(consumer_start_line, consumer_end_line, "consumer")
-
+        warnings: list[str] = []
         source_repo_name = f"github.com/{provider_owner}/{provider_repo}"
-        provider_content = await asyncio.to_thread(
-            zoekt_tools.fetch_content,
-            source_repo_name,
-            provider_path,
-            provider_start_line,
-            provider_end_line,
+        provider_content, provider_start_line, provider_end_line = await asyncio.to_thread(
+            _fetch_side, source_repo_name, provider_path,
+            int(cli.provider_start_line), int(cli.provider_end_line), "provider", warnings,
         )
-        consumer_content = await asyncio.to_thread(
-            zoekt_tools.fetch_content,
-            consumer_repo,
-            consumer_path,
-            consumer_start_line,
-            consumer_end_line,
+        consumer_content, consumer_start_line, consumer_end_line = await asyncio.to_thread(
+            _fetch_side, consumer_repo, consumer_path,
+            int(cli.consumer_start_line), int(cli.consumer_end_line), "consumer", warnings,
         )
 
         provider_signals = _extract_signals(provider_content)
@@ -287,7 +283,6 @@ async def main():
             ),
         }
 
-        warnings: list[str] = []
         provider_signal_count = _signal_count(provider_signals)
         consumer_signal_count = _signal_count(consumer_signals)
         if provider_signal_count == 0:

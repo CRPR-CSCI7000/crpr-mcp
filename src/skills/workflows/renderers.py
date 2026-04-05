@@ -164,6 +164,7 @@ def _render_file_context_result(payload: Any) -> list[str]:
     end_line = _coerce_int(payload.get("end_line"), default=start_line)
     content = str(payload.get("content", ""))
     evidence_origin = str(payload.get("evidence_origin", "")).strip() or "zoekt_index"
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
 
     header = (
         f"`{repo}/{path}` lines `{start_line}-{end_line}`" if repo and path else f"Lines `{start_line}-{end_line}`"
@@ -171,7 +172,15 @@ def _render_file_context_result(payload: Any) -> list[str]:
     lines = [header, f"- Evidence origin: `{evidence_origin}`"]
     if source_owner and source_repo:
         lines.append(f"- Source PR repo: `{source_owner}/{source_repo}`")
+    if warnings:
+        lines.append(f"- Warnings: `{len(warnings)}`")
     lines.append("")
+
+    if warnings:
+        lines.append("### Warnings")
+        for warning in warnings[:10]:
+            lines.append(f"- {warning}")
+        lines.append("")
 
     if not content:
         lines.append("No content returned for the requested range.")
@@ -520,9 +529,6 @@ def _render_search_results(results: list[Any], max_files: int = 10, max_matches_
         if len(matches) > max_matches_per_file:
             lines.append(f"... `{len(matches) - max_matches_per_file}` additional matches omitted")
 
-        url = str(entry.get("url", "")).strip()
-        if url:
-            lines.append(url)
 
     if len(results) > max_files:
         lines.append(f"... and `{len(results) - max_files}` more files.")

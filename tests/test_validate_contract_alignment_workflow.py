@@ -71,9 +71,7 @@ const submitOrder = async function(orderId, customerId) {
 """.strip()
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
-        if repo == "github.com/acme/checkout":
-            return provider_content
-        return consumer_content
+        return provider_content if repo == "github.com/acme/checkout" else consumer_content
 
     monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
@@ -107,9 +105,7 @@ const submitOrder = async function(orderId, customerId) {
 """.strip()
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
-        if repo == "github.com/acme/checkout":
-            return provider_content
-        return consumer_content
+        return provider_content if repo == "github.com/acme/checkout" else consumer_content
 
     monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
@@ -128,9 +124,7 @@ def test_validate_contract_alignment_returns_partial_coverage_with_warnings(monk
     _set_cli_args(module, monkeypatch, _default_cli_args())
 
     def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
-        if repo == "github.com/acme/checkout":
-            return "# notes only"
-        return "// no contract content"
+        return "# notes only" if repo == "github.com/acme/checkout" else "// no contract content"
 
     monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
 
@@ -145,3 +139,52 @@ def test_validate_contract_alignment_returns_partial_coverage_with_warnings(monk
         "one_or_more_sides_have_no_extractable_signals",
         "heuristic_extraction_sparse",
     }
+
+
+def test_validate_contract_alignment_propagates_clamping_warnings(monkeypatch, capsys) -> None:
+    module = _load_script_module("validate_contract_alignment.py")
+    MAX = module.zoekt_tools.MAX_FETCH_WINDOW_LINES
+    args = _default_cli_args()
+    args["provider_end_line"] = 65
+    args["consumer_end_line"] = 65
+    _set_cli_args(module, monkeypatch, args)
+
+    calls: list[tuple[str, str, int, int]] = []
+
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        calls.append((repo, path, start_line, end_line))
+        return "router.get('/v1/orders', async function fetchOrder(orderId) { return {'order_id': orderId}; }"
+
+    monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
+
+    exit_code = asyncio.run(module.main())
+    captured = capsys.readouterr()
+    payload = _parse_result_payload(module, captured.out)
+
+    assert exit_code == 0
+    assert payload["provider"]["end_line"] == MAX
+    assert payload["consumer"]["end_line"] == MAX
+    assert all((_repo, _path, 1, MAX) == call for call, (_repo, _path, _, _) in zip(calls, calls))
+    assert any("provider" in w and "clamped" in w for w in payload["warnings"])
+    assert any("consumer" in w and "clamped" in w for w in payload["warnings"])
+
+
+def test_validate_contract_alignment_emits_result_marker_when_fetch_fails(monkeypatch, capsys) -> None:
+    module = _load_script_module("validate_contract_alignment.py")
+    _set_cli_args(module, monkeypatch, _default_cli_args())
+
+    def fake_fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
+        raise RuntimeError("/print request failed with status 418: ambiguous result: []")
+
+    monkeypatch.setattr(module.zoekt_tools, "fetch_content", fake_fetch_content)
+
+    exit_code = asyncio.run(module.main())
+    captured = capsys.readouterr()
+    payload = _parse_result_payload(module, captured.out)
+
+    assert exit_code == 0
+    assert payload["coverage_complete"] is False
+    assert payload["signal_counts"] == {"provider": 0, "consumer": 0}
+    assert payload["warnings"]
+    assert any("provider content fetch failed" in warning for warning in payload["warnings"])
+    assert any("consumer content fetch failed" in warning for warning in payload["warnings"])
