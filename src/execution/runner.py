@@ -16,6 +16,7 @@ from .safety import validate_custom_workflow_code
 RESULT_MARKER = "__RESULT_JSON__="
 TIMEOUT_EXIT_CODE = 124
 _ENV_ALLOWLIST = {
+    "CRPR_CONTEXT_ID",
     "HOME",
     "LANG",
     "LC_ALL",
