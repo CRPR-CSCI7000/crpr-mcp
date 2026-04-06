@@ -258,6 +258,7 @@ def _render_pr_impact_assessment_result(payload: Any) -> list[str]:
     ]
     if removed_top:
         lines.extend(["", "### Notable Removals"])
+        lines.append("- Note: removed paths are not readable from the current PR-head Zoekt index.")
         for entry in removed_top[:5]:
             filename = str(entry.get("filename", "(unknown)"))
             changes = _coerce_int(entry.get("changes"), 0)
@@ -270,6 +271,7 @@ def _render_pr_impact_assessment_result(payload: Any) -> list[str]:
     ]
     if renamed_top:
         lines.extend(["", "### Notable Renames"])
+        lines.append("- Note: for Zoekt reads/searches, use the new path shown after `->`.")
         for entry in renamed_top[:5]:
             filename = str(entry.get("filename", "(unknown)"))
             previous = str(entry.get("previous_filename", "")).strip()

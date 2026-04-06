@@ -56,6 +56,8 @@ Works for both source-repo and cross-repo files present in the context snapshot.
 1. `file_context_reader --repo github.com/acme/inventory --path src/service.py --start-line 40 --end-line 85`
 ### Constraints
 - Requires a file path, not a directory.
+- Include owner and repo for reliability: `<owner>/<repo>` or `github.com/<owner>/<repo>`.
+- Bare repo names (for example `pantry_pal_api_TEST`) may fail in PR-scoped contexts.
 - Hard limit: requested window (`end_line - start_line + 1`) must be <= 60 lines.
 - Prefer iterative narrow reads over broad file grabs.
 

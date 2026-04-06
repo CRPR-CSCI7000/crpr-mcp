@@ -24,9 +24,7 @@ class OutputModel(BaseModel):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Read a bounded line range from one non-source repository file via Zoekt."
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--path", required=True)
     parser.add_argument("--start-line", type=int, required=True)

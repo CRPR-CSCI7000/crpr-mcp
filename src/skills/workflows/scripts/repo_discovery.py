@@ -33,7 +33,10 @@ async def main():
             raise ValueError("missing required arg: query")
 
         limit = int(cli.limit)
-        repo_query = query if "type:repo" in query else f"{query} type:repo"
+        # Zoekt treats `type:repo <expr>` as repository-list mode. Appending
+        # `type:repo` at the end can parse as a normal file search with an
+        # additional filter, which then biases results to a single top repo.
+        repo_query = query if "type:repo" in query else f"type:repo {query}"
         results = await asyncio.to_thread(zoekt_tools.search, repo_query, limit, 0)
 
         repositories = sorted({entry.get("repository", "") for entry in results if entry.get("repository")})
