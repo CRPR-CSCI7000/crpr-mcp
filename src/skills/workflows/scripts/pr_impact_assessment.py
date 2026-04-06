@@ -27,7 +27,9 @@ class OutputModel(BaseModel):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="Build pull request impact assessment from metadata and changed files.")
+    parser = argparse.ArgumentParser(
+        description="Build pull request impact assessment from metadata and changed files."
+    )
     return parser.parse_args(argv)
 
 
@@ -104,6 +106,7 @@ async def main():
                 {
                     "filename": filename,
                     "status": status,
+                    "previous_filename": str(file_info.get("previous_filename", "")).strip(),
                     "additions": additions,
                     "deletions": deletions,
                     "changes": changes,
@@ -119,9 +122,7 @@ async def main():
                 "deletions": totals["deletions"],
                 "changes": totals["changes"],
             }
-            for extension, totals in sorted(
-                extension_totals.items(), key=lambda item: item[1]["changes"], reverse=True
-            )
+            for extension, totals in sorted(extension_totals.items(), key=lambda item: item[1]["changes"], reverse=True)
         ]
 
         output = {

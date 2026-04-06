@@ -47,8 +47,6 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
         "symbol_usage": _render_symbol_usage_result,
         "file_context_reader": _render_file_context_result,
         "pr_impact_assessment": _render_pr_impact_assessment_result,
-        "pr_cross_repo_overlap_candidates": _render_pr_cross_repo_overlap_candidates_result,
-        "validate_contract_alignment": _render_validate_contract_alignment_result,
     }
     renderer = workflow_renderers.get(workflow_id, _render_generic_workflow_result)
     body = renderer(payload)
@@ -85,7 +83,9 @@ def _render_repo_discovery_result(payload: Any) -> list[str]:
     results = payload.get("results") if isinstance(payload.get("results"), list) else []
 
     lines = [
-        f"Found `{len(repositories)}` repositories for `{query}`." if query else f"Found `{len(repositories)}` repositories.",
+        f"Found `{len(repositories)}` repositories for `{query}`."
+        if query
+        else f"Found `{len(repositories)}` repositories.",
         "",
     ]
     if repositories:
@@ -166,9 +166,7 @@ def _render_file_context_result(payload: Any) -> list[str]:
     evidence_origin = str(payload.get("evidence_origin", "")).strip() or "zoekt_index"
     warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
 
-    header = (
-        f"`{repo}/{path}` lines `{start_line}-{end_line}`" if repo and path else f"Lines `{start_line}-{end_line}`"
-    )
+    header = f"`{repo}/{path}` lines `{start_line}-{end_line}`" if repo and path else f"Lines `{start_line}-{end_line}`"
     lines = [header, f"- Evidence origin: `{evidence_origin}`"]
     if source_owner and source_repo:
         lines.append(f"- Source PR repo: `{source_owner}/{source_repo}`")
@@ -252,219 +250,35 @@ def _render_pr_impact_assessment_result(payload: Any) -> list[str]:
                 filename = str(entry.get("filename", "(unknown)"))
                 changes = _coerce_int(entry.get("changes"), 0)
                 lines.append(f"- `{filename}`: `{changes}` changes")
-    return lines
 
-
-def _render_pr_cross_repo_overlap_candidates_result(payload: Any) -> list[str]:
-    if not isinstance(payload, dict):
-        return _render_generic_workflow_result(payload)
-
-    owner = str(payload.get("owner", "")).strip()
-    repo = str(payload.get("repo", "")).strip()
-    pr_number = _coerce_int(payload.get("pr_number"), default=0)
-    inspected_repo_count = _coerce_int(payload.get("inspected_repo_count"), default=0)
-    overlap_candidates = (
-        payload.get("overlap_candidates") if isinstance(payload.get("overlap_candidates"), list) else []
-    )
-    confirmed_conflicts = (
-        payload.get("confirmed_conflicts") if isinstance(payload.get("confirmed_conflicts"), list) else []
-    )
-    no_confirmed_conflicts = bool(payload.get("no_confirmed_conflicts", False))
-    no_confirmed_conflicts_reason = str(payload.get("no_confirmed_conflicts_reason", "")).strip()
-    coverage_complete = bool(payload.get("coverage_complete", False))
-    coverage_reason = str(payload.get("coverage_reason", "")).strip()
-    required_followup_angles = (
-        payload.get("required_followup_angles") if isinstance(payload.get("required_followup_angles"), list) else []
-    )
-    suggested_alignment_checks = (
-        payload.get("suggested_alignment_checks")
-        if isinstance(payload.get("suggested_alignment_checks"), list)
-        else []
-    )
-    excluded_source_repos = (
-        payload.get("excluded_source_repos") if isinstance(payload.get("excluded_source_repos"), list) else []
-    )
-
-    lines = [
-        f"PR `{owner}/{repo}#{pr_number}` cross-repo overlap scan." if owner and repo else "Cross-repo overlap scan.",
-        f"- Repositories inspected: `{inspected_repo_count}`",
-        f"- Overlap candidates (unvalidated): `{len(overlap_candidates)}`",
-        f"- Confirmed conflicts: `{len(confirmed_conflicts)}`",
-        "- Candidate-only workflow: follow-up validation is required before a final no-conflict claim.",
+    removed_top = [
+        entry
+        for entry in largest_files
+        if isinstance(entry, dict) and str(entry.get("status", "")).strip().lower() == "removed"
     ]
-    if no_confirmed_conflicts:
-        lines.append(
-            f"- No confirmed conflicts in this pass: `true` ({no_confirmed_conflicts_reason or 'no_reason_provided'})"
-        )
-    else:
-        lines.append("- No confirmed conflicts in this pass: `false`")
-    if coverage_complete:
-        lines.append("- Coverage complete: `true`")
-    else:
-        lines.append(f"- Coverage complete: `false` ({coverage_reason or 'followup_required'})")
-    if required_followup_angles:
-        lines.append("- Required follow-up angles:")
-        lines.extend([f"  - `{angle}`" for angle in required_followup_angles[:8]])
-    lines.append(f"- Suggested alignment checks: `{len(suggested_alignment_checks)}`")
-    if excluded_source_repos:
-        lines.append("- Source repos excluded by default:")
-        lines.extend([f"  - `{source_repo}`" for source_repo in excluded_source_repos[:5]])
+    if removed_top:
+        lines.extend(["", "### Notable Removals"])
+        for entry in removed_top[:5]:
+            filename = str(entry.get("filename", "(unknown)"))
+            changes = _coerce_int(entry.get("changes"), 0)
+            lines.append(f"- `{filename}`: `{changes}` changes")
 
-    if confirmed_conflicts:
-        lines.extend(["", "### Confirmed Conflicts"])
-        for entry in confirmed_conflicts[:10]:
-            if not isinstance(entry, dict):
-                continue
-            conflict_repo = str(entry.get("repo", "(unknown)"))
-            total_hits = _coerce_int(entry.get("total_hits"), default=0)
-            evidence_count = _coerce_int(entry.get("contract_evidence_count"), default=0)
-            lines.append(
-                f"- `{conflict_repo}`: `{evidence_count}` contract evidence samples (`{total_hits}` total overlap hits)"
-            )
-
-    if overlap_candidates:
-        lines.extend(["", "### Top Overlap Candidate Repos (Unvalidated)"])
-        for entry in overlap_candidates[:10]:
-            if not isinstance(entry, dict):
-                continue
-            conflict_repo = str(entry.get("repo", "(unknown)"))
-            total_hits = _coerce_int(entry.get("total_hits"), default=0)
-            term_matches = entry.get("term_matches") if isinstance(entry.get("term_matches"), list) else []
-            lines.append(f"- `{conflict_repo}`: `{total_hits}` total hits (`{len(term_matches)}` matched terms)")
-        sample_hits = _collect_overlap_candidate_samples(overlap_candidates)
-        if sample_hits:
-            lines.extend(["", "### Candidate Sample Snippets", *_render_search_results(sample_hits, max_files=8)])
-    else:
-        lines.extend(["", "No cross-repo overlap candidates found."])
-
-    if suggested_alignment_checks:
-        lines.extend(["", "### Suggested Alignment Checks"])
-        for index, check in enumerate(suggested_alignment_checks[:8], start=1):
-            if not isinstance(check, dict):
-                continue
-            term = str(check.get("term", "")).strip() or "(unknown term)"
-            command = _alignment_check_command_from_suggestion(check)
-            lines.append(f"{index}. `{term}`")
-            lines.append(f"   `{command}`")
-    return lines
-
-
-def _render_validate_contract_alignment_result(payload: Any) -> list[str]:
-    if not isinstance(payload, dict):
-        return _render_generic_workflow_result(payload)
-
-    provider = payload.get("provider") if isinstance(payload.get("provider"), dict) else {}
-    consumer = payload.get("consumer") if isinstance(payload.get("consumer"), dict) else {}
-    alignment = payload.get("alignment") if isinstance(payload.get("alignment"), dict) else {}
-    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
-    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
-    coverage_complete = bool(payload.get("coverage_complete", False))
-    coverage_reason = str(payload.get("coverage_reason", "")).strip() or "unknown"
-
-    provider_label = f"{provider.get('owner', '')}/{provider.get('repo', '')}".strip("/")
-    provider_path = str(provider.get("path", "")).strip()
-    consumer_repo = str(consumer.get("repo", "")).strip()
-    consumer_path = str(consumer.get("path", "")).strip()
-
-    lines = [
-        "Contract alignment assessment.",
-        f"- Provider: `{provider_label}` `{provider_path}`",
-        f"- Consumer: `{consumer_repo}` `{consumer_path}`",
-        f"- Coverage complete: `{'true' if coverage_complete else 'false'}` ({coverage_reason})",
+    renamed_top = [
+        entry
+        for entry in largest_files
+        if isinstance(entry, dict) and str(entry.get("status", "")).strip().lower() == "renamed"
     ]
-
-    if warnings:
-        lines.extend(["", "### Warnings"])
-        for warning in warnings[:10]:
-            lines.append(f"- {warning}")
-
-    if alignment:
-        lines.extend(["", "### Alignment Diff"])
-        for category in ("keys", "params", "http_signatures"):
-            category_alignment = alignment.get(category)
-            if not isinstance(category_alignment, dict):
-                continue
-            shared = category_alignment.get("shared") if isinstance(category_alignment.get("shared"), list) else []
-            provider_only = (
-                category_alignment.get("provider_only")
-                if isinstance(category_alignment.get("provider_only"), list)
-                else []
-            )
-            consumer_only = (
-                category_alignment.get("consumer_only")
-                if isinstance(category_alignment.get("consumer_only"), list)
-                else []
-            )
-            lines.append(
-                f"- `{category}`: shared `{len(shared)}`, provider-only `{len(provider_only)}`, consumer-only `{len(consumer_only)}`"
-            )
-
-    if findings:
-        lines.extend(["", "### Findings"])
-        for finding in findings[:12]:
-            if not isinstance(finding, dict):
-                continue
-            category = str(finding.get("category", "overall"))
-            kind = str(finding.get("kind", "unknown"))
-            count = _coerce_int(finding.get("count"), 0)
-            confidence = str(finding.get("confidence", "low"))
-            lines.append(f"- `{category}` `{kind}`: `{count}` items (`{confidence}` confidence)")
+    if renamed_top:
+        lines.extend(["", "### Notable Renames"])
+        for entry in renamed_top[:5]:
+            filename = str(entry.get("filename", "(unknown)"))
+            previous = str(entry.get("previous_filename", "")).strip()
+            changes = _coerce_int(entry.get("changes"), 0)
+            if previous:
+                lines.append(f"- `{previous}` -> `{filename}`: `{changes}` changes")
+            else:
+                lines.append(f"- `{filename}`: `{changes}` changes")
     return lines
-
-
-def _collect_overlap_candidate_samples(overlap_candidates: list[Any]) -> list[dict[str, Any]]:
-    samples: list[dict[str, Any]] = []
-    for candidate in overlap_candidates[:6]:
-        if not isinstance(candidate, dict):
-            continue
-        repo = str(candidate.get("repo", "")).strip()
-        term_matches = candidate.get("term_matches")
-        if not isinstance(term_matches, list):
-            continue
-        for term_match in term_matches[:2]:
-            if not isinstance(term_match, dict):
-                continue
-            samples_list = term_match.get("samples")
-            if not isinstance(samples_list, list):
-                continue
-            for sample in samples_list[:1]:
-                if not isinstance(sample, dict):
-                    continue
-                sample_repo = str(sample.get("repository", "")).strip() or repo
-                filename = str(sample.get("filename", "")).strip()
-                matches = sample.get("matches") if isinstance(sample.get("matches"), list) else []
-                if not filename or not matches:
-                    continue
-                samples.append(
-                    {
-                        "repository": sample_repo,
-                        "filename": filename,
-                        "matches": matches,
-                        "url": sample.get("url"),
-                    }
-                )
-    return samples
-
-
-def _alignment_check_command_from_suggestion(check: dict[str, Any]) -> str:
-    command_parts = ["validate_contract_alignment"]
-    arg_order = [
-        "provider_path",
-        "provider_start_line",
-        "provider_end_line",
-        "consumer_repo",
-        "consumer_path",
-        "consumer_start_line",
-        "consumer_end_line",
-    ]
-    for arg_name in arg_order:
-        if arg_name not in check:
-            continue
-        value = check.get(arg_name)
-        if value is None:
-            continue
-        command_parts.append(f"--{arg_name.replace('_', '-')} {value}")
-    return " ".join(command_parts)
 
 
 def _render_generic_workflow_result(payload: Any) -> list[str]:
@@ -528,7 +342,6 @@ def _render_search_results(results: list[Any], max_files: int = 10, max_matches_
 
         if len(matches) > max_matches_per_file:
             lines.append(f"... `{len(matches) - max_matches_per_file}` additional matches omitted")
-
 
     if len(results) > max_files:
         lines.append(f"... and `{len(results) - max_files}` more files.")

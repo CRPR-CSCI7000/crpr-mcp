@@ -25,15 +25,6 @@ The server exposes only these 4 tools:
 
 All tool responses are rendered as markdown text for agent readability.
 
-Removed tools:
-
-- `search`
-- `search_symbols`
-- `search_prompt_guide`
-- `fetch_content`
-- `list_dir`
-- `list_repos`
-
 ## Recommended Flow
 
 1. Call `list_capabilities`.
@@ -87,8 +78,7 @@ Required for GitHub-backed PR workflows (GitHub App preferred, PAT fallback):
   - `GITHUB_APP_INSTALLATION_ID`
 
 - `GITHUB_TOKEN` (PAT fallback when GitHub App auth is not configured or fails)
-  - Used by workflows such as `pr_impact_assessment`,
-    and `pr_cross_repo_overlap_candidates`.
+  - Used by workflows such as `pr_impact_assessment`.
   - Token should have access to the repositories being analyzed.
 
 Optional:
