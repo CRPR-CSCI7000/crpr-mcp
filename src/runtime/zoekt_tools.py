@@ -164,6 +164,22 @@ def search_symbols(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> list[dict[s
     return _get_runtime().search_symbols(query=query, limit=limit)
 
 
+def normalize_repo(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return normalized
+    normalized = normalized.replace("https://", "").replace("http://", "")
+    normalized = normalized.removesuffix(".git").strip("/")
+    if normalized.lower().startswith("github.com/"):
+        owner_repo = normalized[len("github.com/") :]
+    else:
+        owner_repo = normalized
+    owner_repo = owner_repo.lower()
+    if "/" not in owner_repo:
+        return owner_repo
+    return f"github.com/{owner_repo}"
+
+
 def fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
     return _get_runtime().fetch_content(repo=repo, path=path, start_line=start_line, end_line=end_line)
 

@@ -79,9 +79,9 @@ Exactly one of `term` or `raw_query` is required.
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`
-2. `symbol_usage --term add_to_pantry --repo github.com/acme/ui --expand-variants true --limit 8`
-3. `symbol_usage --raw-query 'r:github.com/acme/ui addToPantry lang:javascript -f:test' --limit 8 --context-lines 1`
+1. `symbol_usage --term enqueueInvoice --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`
+2. `symbol_usage --term enqueue_invoice --repo github.com/acme/ui --expand-variants true --limit 8`
+3. `symbol_usage --raw-query 'r:github.com/acme/ui enqueueInvoice lang:javascript -f:test' --limit 8 --context-lines 1`
 ### Constraints
 - Exactly one of `term` or `raw_query` is required.
 - Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).

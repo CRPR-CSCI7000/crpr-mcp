@@ -115,11 +115,11 @@ def test_parse_workflow_cli_normalizes_over_escaped_double_quotes(tmp_path: Path
     runner = _build_runner(tmp_path)
 
     workflow_id, args = runner.parse_workflow_cli_command(
-        'symbol_usage --raw-query \\"addToPantry r:github.com/acme/ui\\" --context-lines 1'
+        'symbol_usage --raw-query \\"enqueueInvoice r:github.com/acme/ui\\" --context-lines 1'
     )
 
     assert workflow_id == "symbol_usage"
-    assert args["raw_query"] == "addToPantry r:github.com/acme/ui"
+    assert args["raw_query"] == "enqueueInvoice r:github.com/acme/ui"
     assert args["context_lines"] == 1
 
 
@@ -127,7 +127,7 @@ def test_parse_workflow_cli_adds_hint_for_split_value_from_over_escaped_quotes(t
     runner = _build_runner(tmp_path)
 
     with pytest.raises(ValueError, match="over-escaped quotes"):
-        runner.parse_workflow_cli_command('symbol_usage --raw-query \\"addToPantry r:github.com/acme/ui --context-lines 1')
+        runner.parse_workflow_cli_command('symbol_usage --raw-query \\"enqueueInvoice r:github.com/acme/ui --context-lines 1')
 
 
 def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
@@ -135,7 +135,7 @@ def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
         {
             "expand_variants": False,
             "context_lines": 1,
-            "raw_query": "addToPantry r:github.com/acme/ui",
+            "raw_query": "enqueueInvoice r:github.com/acme/ui",
         }
     )
 
@@ -144,7 +144,7 @@ def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
     assert "--raw-query" in argv
     assert "false" in argv
     assert "1" in argv
-    assert "addToPantry r:github.com/acme/ui" in argv
+    assert "enqueueInvoice r:github.com/acme/ui" in argv
 
 
 def test_build_environment_omits_github_secrets_and_injects_rpc_url(tmp_path: Path, monkeypatch) -> None:

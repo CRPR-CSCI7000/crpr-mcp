@@ -36,7 +36,7 @@ All tool responses are rendered as markdown text for agent readability.
 `run_workflow_cli` command format:
 
 - `<workflow_id> [--flag value]...`
-- Example: `symbol_usage --term addToPantry --repo github.com/acme/ui --lang javascript --limit 8 --context-lines 1`
+- Example: `symbol_usage --term enqueueInvoice --repo github.com/acme/ui --lang javascript --limit 8 --context-lines 1`
 
 ## Custom Workflow Code Constraints
 

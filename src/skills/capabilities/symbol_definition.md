@@ -6,10 +6,26 @@ order: 2
 execution:
   script_path: skills/workflows/scripts/symbol_definition.py
   arg_schema:
-    query:
+    term:
       type: string
       required: true
-      description: Symbol query, optionally with filters (repo/lang/etc).
+      description: Symbol term for structured definition query composition.
+    repo:
+      type: string
+      required: false
+      description: Repository filter mapped to `r:<repo>`.
+    lang:
+      type: string
+      required: false
+      description: Language filter mapped to `lang:<lang>`.
+    path:
+      type: string
+      required: false
+      description: Path include filter mapped to `f:<path>`.
+    exclude_path:
+      type: string
+      required: false
+      description: Path exclude filter mapped to `-f:<path>`.
     limit:
       type: integer
       required: false
@@ -35,7 +51,7 @@ execution:
 
 ### Description
 Uses symbol-focused search to locate likely definition sites for a named symbol.
-Supports passing additional Zoekt filters inside `query` (for example repo/lang filters).
+Builds a structured query from `term` and optional Zoekt filters.
 
 
 ### Arg Usage
@@ -44,10 +60,12 @@ Supports passing additional Zoekt filters inside `query` (for example repo/lang 
 ### Arguments
 {{ARG_TABLE}}
 ### Examples
-1. `symbol_definition --query 'PaymentService lang:python'`
+1. `symbol_definition --term PaymentService --lang python`
+2. `symbol_definition --term ProcessOrder --repo github.com/acme/checkout --path src/services --exclude-path test --limit 8`
 ### Constraints
 - Focused on definitions, not general usages.
-- Prefer adding `lang:` and `r:` filters for precision.
+- Structured mode only; raw query passthrough is not supported.
+- Prefer adding `lang` and `repo` filters for precision.
 
 ### Expected Output Summary
 Returns markdown to the agent; key structured fields in that output include:

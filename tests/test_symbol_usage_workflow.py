@@ -41,7 +41,7 @@ def test_symbol_usage_structured_builds_query_fragments(monkeypatch, capsys) -> 
         module,
         monkeypatch,
         {
-            "term": "addToPantry",
+            "term": "enqueueInvoice",
             "repo": "github.com/acme/ui",
             "lang": "javascript",
             "path": "src/actions",
@@ -63,16 +63,45 @@ def test_symbol_usage_structured_builds_query_fragments(monkeypatch, capsys) -> 
     payload = _parse_result_payload(module, captured.out)
 
     assert exit_code == 0
-    assert query_log == ["addToPantry r:github.com/acme/ui lang:javascript f:src/actions -f:test"]
+    assert query_log == ["enqueueInvoice r:github.com/acme/ui lang:javascript f:src/actions -f:test"]
     assert payload["mode"] == "structured"
     assert payload["total_queries"] == 1
     assert payload["attempted_queries"][0]["variant_label"] == "exact"
     assert payload["attempted_queries"][0]["hits"] == 0
 
 
+def test_symbol_usage_structured_normalizes_repo_input(monkeypatch, capsys) -> None:
+    module = _load_script_module("symbol_usage.py")
+    _set_cli_args(
+        module,
+        monkeypatch,
+        {
+            "term": "buildClient",
+            "repo": "Example-Labs/Invoice_UI_DEMO",
+            "limit": 5,
+            "context_lines": 1,
+        },
+    )
+
+    query_log: list[str] = []
+    monkeypatch.setattr(
+        module.zoekt_tools,
+        "search",
+        lambda query, limit, context_lines: query_log.append(query) or [],
+    )
+
+    exit_code = asyncio.run(module.main())
+    captured = capsys.readouterr()
+    payload = _parse_result_payload(module, captured.out)
+
+    assert exit_code == 0
+    assert query_log == ["buildClient r:github.com/example-labs/invoice_ui_demo"]
+    assert payload["input"]["repo"] == "github.com/example-labs/invoice_ui_demo"
+
+
 def test_symbol_usage_raw_query_bypasses_builder(monkeypatch, capsys) -> None:
     module = _load_script_module("symbol_usage.py")
-    raw_query = "r:github.com/acme/ui addToPantry lang:javascript -f:test"
+    raw_query = "r:github.com/acme/ui enqueueInvoice lang:javascript -f:test"
     _set_cli_args(
         module,
         monkeypatch,
@@ -114,7 +143,7 @@ def test_symbol_usage_requires_term_or_raw_query(monkeypatch, capsys) -> None:
 
 def test_symbol_usage_variant_expansion_is_opt_in(monkeypatch, capsys) -> None:
     module = _load_script_module("symbol_usage.py")
-    _set_cli_args(module, monkeypatch, {"term": "add_to_pantry"})
+    _set_cli_args(module, monkeypatch, {"term": "enqueue_invoice"})
 
     query_log: list[str] = []
     monkeypatch.setattr(
@@ -128,14 +157,14 @@ def test_symbol_usage_variant_expansion_is_opt_in(monkeypatch, capsys) -> None:
     payload = _parse_result_payload(module, captured.out)
 
     assert exit_code == 0
-    assert query_log == ["add_to_pantry"]
+    assert query_log == ["enqueue_invoice"]
     assert payload["total_queries"] == 1
     assert payload["attempted_queries"][0]["variant_label"] == "exact"
 
 
 def test_symbol_usage_variant_expansion_is_deterministic_when_enabled(monkeypatch, capsys) -> None:
     module = _load_script_module("symbol_usage.py")
-    _set_cli_args(module, monkeypatch, {"term": "add_to_pantry", "expand_variants": True})
+    _set_cli_args(module, monkeypatch, {"term": "enqueue_invoice", "expand_variants": True})
 
     query_log: list[str] = []
     monkeypatch.setattr(
@@ -149,12 +178,12 @@ def test_symbol_usage_variant_expansion_is_deterministic_when_enabled(monkeypatc
     payload = _parse_result_payload(module, captured.out)
 
     expected_queries = [
-        "add_to_pantry",
-        "add-to-pantry",
-        "addToPantry",
-        "AddToPantry",
-        "add_to_pantries",
-        "addToPantries",
+        "enqueue_invoice",
+        "enqueue-invoice",
+        "enqueueInvoice",
+        "EnqueueInvoice",
+        "enqueue_invoices",
+        "enqueueInvoices",
     ]
     expected_labels = [
         "exact",
@@ -173,30 +202,30 @@ def test_symbol_usage_variant_expansion_is_deterministic_when_enabled(monkeypatc
 
 def test_symbol_usage_deduplicates_merged_results_and_reports_trace(monkeypatch, capsys) -> None:
     module = _load_script_module("symbol_usage.py")
-    _set_cli_args(module, monkeypatch, {"term": "add_to_pantry", "expand_variants": True, "limit": 10})
+    _set_cli_args(module, monkeypatch, {"term": "enqueue_invoice", "expand_variants": True, "limit": 10})
 
     query_log: list[str] = []
     duplicate_hit = {
         "repository": "github.com/acme/ui",
-        "filename": "src/actions/productActions.js",
-        "matches": [{"line_number": 11, "text": "dispatch(addToPantry(payload));"}],
+        "filename": "src/actions/invoiceActions.js",
+        "matches": [{"line_number": 11, "text": "dispatch(enqueueInvoice(payload));"}],
     }
     unique_hit = {
         "repository": "github.com/acme/ui",
-        "filename": "src/components/ManualItemModal.jsx",
-        "matches": [{"line_number": 22, "text": "dispatch(addToPantry(formPayload));"}],
+        "filename": "src/components/InvoiceEditorModal.jsx",
+        "matches": [{"line_number": 22, "text": "dispatch(enqueueInvoice(formPayload));"}],
     }
 
     def _fake_search(query: str, limit: int, context_lines: int):
         query_log.append(query)
-        if query.startswith("add_to_pantry"):
+        if query == "enqueue_invoice":
             return [duplicate_hit]
-        if query.startswith("addToPantry"):
+        if query == "enqueueInvoice":
             return [
                 {
                     "repository": "github.com/acme/ui",
-                    "filename": "src/actions/productActions.js",
-                    "matches": [{"line_number": 11, "text": "dispatch(addToPantry(payload));"}],
+                    "filename": "src/actions/invoiceActions.js",
+                    "matches": [{"line_number": 11, "text": "dispatch(enqueueInvoice(payload));"}],
                 },
                 unique_hit,
             ]

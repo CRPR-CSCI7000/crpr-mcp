@@ -32,28 +32,12 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def _normalize_repo(value: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        return normalized
-    normalized = normalized.replace("https://", "").replace("http://", "")
-    normalized = normalized.removesuffix(".git").strip("/")
-    if normalized.lower().startswith("github.com/"):
-        owner_repo = normalized[len("github.com/") :]
-    else:
-        owner_repo = normalized
-    owner_repo = owner_repo.lower()
-    if "/" not in owner_repo:
-        return owner_repo
-    return f"github.com/{owner_repo}"
-
-
 async def main():
     try:
         cli = parse_args()
         source_owner, source_repo, source_pr_number = runtime_context.resolve_pr_identity()
 
-        repo = _normalize_repo(str(cli.repo))
+        repo = zoekt_tools.normalize_repo(str(cli.repo))
         path = str(cli.path).strip()
         if not repo:
             raise ValueError("missing required arg: repo")

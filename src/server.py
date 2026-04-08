@@ -38,6 +38,7 @@ HEADER_THREAD_PR_NUMBER = "x-crpr-thread-pr-number"
 
 class CrprMCPServer:
     _DISCOVERY_ITEMS_PLACEHOLDER = "{{DISCOVERY_ITEMS}}"
+    _RUNTIME_HELPERS_SECTION_PLACEHOLDER = "{{RUNTIME_HELPERS_SECTION}}"
 
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
@@ -151,10 +152,13 @@ class CrprMCPServer:
                 return capability_doc
 
             runtime_helper_details = await asyncio.to_thread(self._runtime_helper_details)
-            return self._append_runtime_helper_details(
-                capability_doc=capability_doc,
+            runtime_helpers_section = self._render_runtime_helpers_section(
                 runtime_helper_details=runtime_helper_details,
                 allowed_runtime_modules=get_allowed_runtime_modules(),
+            )
+            return self._inject_runtime_helpers_section(
+                capability_doc=capability_doc,
+                runtime_helpers_section=runtime_helpers_section,
             )
         except Exception as exc:
             logger.error("read_capability failed: %s", exc)
@@ -368,6 +372,13 @@ class CrprMCPServer:
                     f"view `{view_id}` must include `{self._DISCOVERY_ITEMS_PLACEHOLDER}` exactly once; "
                     f"found {placeholder_count}"
                 )
+        execution_doc = self.skill_registry.capabilities["execution.run_custom_workflow_code"].read_doc
+        runtime_placeholder_count = execution_doc.count(self._RUNTIME_HELPERS_SECTION_PLACEHOLDER)
+        if runtime_placeholder_count != 1:
+            raise ValueError(
+                "capability `execution.run_custom_workflow_code` must include "
+                f"`{self._RUNTIME_HELPERS_SECTION_PLACEHOLDER}` exactly once; found {runtime_placeholder_count}"
+            )
 
     @staticmethod
     def _numbered_cards_block_markdown(
@@ -403,13 +414,11 @@ class CrprMCPServer:
         return "\n".join(self._markdown_block_lines(rendered)).rstrip()
 
     @staticmethod
-    def _append_runtime_helper_details(
-        capability_doc: str,
+    def _render_runtime_helpers_section(
         runtime_helper_details: list[tuple[str, str]],
         allowed_runtime_modules: list[str],
     ) -> str:
-        lines = CrprMCPServer._markdown_block_lines(capability_doc)
-        lines.extend(["", "### Runtime Helpers", "Allowed runtime modules:"])
+        lines = ["Allowed runtime modules:"]
 
         if allowed_runtime_modules:
             lines.extend([f"- `{module}`" for module in allowed_runtime_modules])
@@ -424,6 +433,20 @@ class CrprMCPServer:
             lines.extend(["", *CrprMCPServer._markdown_block_lines(detail_markdown)])
 
         return "\n".join(lines).rstrip()
+
+    def _inject_runtime_helpers_section(
+        self,
+        capability_doc: str,
+        runtime_helpers_section: str,
+    ) -> str:
+        placeholder_count = capability_doc.count(self._RUNTIME_HELPERS_SECTION_PLACEHOLDER)
+        if placeholder_count != 1:
+            raise ValueError(
+                "custom workflow capability doc must include "
+                f"`{self._RUNTIME_HELPERS_SECTION_PLACEHOLDER}` exactly once; found {placeholder_count}"
+            )
+        rendered = capability_doc.replace(self._RUNTIME_HELPERS_SECTION_PLACEHOLDER, runtime_helpers_section)
+        return "\n".join(self._markdown_block_lines(rendered)).rstrip()
 
     @staticmethod
     def _format_execution_result_markdown(title: str, result: ExecutionResult) -> str:

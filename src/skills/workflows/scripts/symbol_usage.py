@@ -194,7 +194,7 @@ async def main():
         cli = parse_args()
         term = _clean(cli.term)
         raw_query = _clean(cli.raw_query)
-        repo = _clean(cli.repo)
+        repo = zoekt_tools.normalize_repo(_clean(cli.repo))
         lang = _clean(cli.lang)
         path = _clean(cli.path)
         exclude_path = _clean(cli.exclude_path)

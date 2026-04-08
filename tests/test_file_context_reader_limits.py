@@ -142,11 +142,11 @@ def test_file_context_reader_normalizes_owner_repo_input(monkeypatch, capsys) ->
     _set_cli_args(
         monkeypatch,
         {
-            "source_owner": "CRPR-CSCI7000",
-            "source_repo": "pantry_pal_api_TEST",
+            "source_owner": "Example-Labs",
+            "source_repo": "billing_api_DEMO",
             "source_pr_number": 7,
-            "repo": "CRPR-CSCI7000/pantry_pal_api_TEST",
-            "path": "routes/pantry_routes.py",
+            "repo": "Example-Labs/billing_api_DEMO",
+            "path": "routes/invoice_routes.py",
             "start_line": 1,
             "end_line": 60,
         },
@@ -157,4 +157,4 @@ def test_file_context_reader_normalizes_owner_repo_input(monkeypatch, capsys) ->
     _ = capsys.readouterr()
 
     assert exit_code == 0
-    assert call_log == [("github.com/crpr-csci7000/pantry_pal_api_test", "routes/pantry_routes.py", 1, 60)]
+    assert call_log == [("github.com/example-labs/billing_api_demo", "routes/invoice_routes.py", 1, 60)]

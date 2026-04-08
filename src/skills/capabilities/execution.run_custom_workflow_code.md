@@ -33,6 +33,8 @@ Runtime helper details are provided in `read_capability(execution.run_custom_wor
 Use self-contained code and emit output via stdout:
 plain text, plain JSON, or `__RESULT_JSON__=<json>` marker (optional).
 
+### Runtime Helpers
+{{RUNTIME_HELPERS_SECTION}}
 
 ### Arguments
 {{ARG_TABLE}}

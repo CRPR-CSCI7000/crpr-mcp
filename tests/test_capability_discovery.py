@@ -34,6 +34,7 @@ def test_read_capability_custom_workflow_includes_runtime_helpers(monkeypatch) -
     markdown = asyncio.run(server.read_capability("execution.run_custom_workflow_code"))
 
     assert "### Runtime Helpers" in markdown
+    assert "{{RUNTIME_HELPERS_SECTION}}" not in markdown
     assert "runtime.github_tools" in markdown
     assert "runtime.github_get_pull_request" in markdown
     assert "runtime.github_tools.get_pull_request(" in markdown
@@ -92,7 +93,23 @@ def test_read_capability_symbol_usage_zoekt_first_contract(monkeypatch) -> None:
     )
     assert "Exactly one of `term` or `raw_query` is required." in markdown
     assert (
-        "1. `symbol_usage --term addToPantry --repo github.com/acme/ui "
+        "1. `symbol_usage --term enqueueInvoice --repo github.com/acme/ui "
         "--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`" in markdown
     )
     assert "- `attempted_queries`: Field with type `list[object]`." in markdown
+
+
+def test_read_capability_symbol_definition_structured_only_contract(monkeypatch) -> None:
+    monkeypatch.setenv("ZOEKT_API_URL", "http://zoekt")
+    server = CrprMCPServer(ServerConfig())
+
+    markdown = asyncio.run(server.read_capability("symbol_definition"))
+
+    assert "### Arg Usage" in markdown
+    assert "--term <string>" in markdown
+    assert "--query" not in markdown
+    assert (
+        "| `--term` | `string` | Yes | N/A | "
+        "Symbol term for structured definition query composition. |" in markdown
+    )
+    assert "Structured mode only; raw query passthrough is not supported." in markdown
