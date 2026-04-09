@@ -288,7 +288,11 @@ def test_run_custom_workflow_code_accepts_plain_json_stdout() -> None:
 
 def test_workflow_requires_pr_scope_matches_expected_workflows() -> None:
     assert ExecutionRunner.workflow_requires_pr_scope("pr_impact_assessment") is True
+    assert ExecutionRunner.workflow_requires_pr_scope("file_context_reader") is True
+    assert ExecutionRunner.workflow_requires_pr_scope("cross_repo_grep") is True
     assert ExecutionRunner.workflow_requires_pr_scope("symbol_usage") is True
+    assert ExecutionRunner.workflow_requires_pr_scope("symbol_definition") is True
+    assert ExecutionRunner.workflow_requires_pr_scope("repo_discovery") is True
 
 
 def test_parse_workflow_cli_rejects_pr_identity_flags_for_scoped_workflow() -> None:

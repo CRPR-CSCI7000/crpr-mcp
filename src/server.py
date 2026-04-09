@@ -35,6 +35,8 @@ load_dotenv()
 HEADER_THREAD_OWNER = "x-crpr-thread-owner"
 HEADER_THREAD_REPO = "x-crpr-thread-repo"
 HEADER_THREAD_PR_NUMBER = "x-crpr-thread-pr-number"
+HEADER_THREAD_ID = "x-crpr-thread-id"
+HEADER_THREAD_TURN = "x-crpr-thread-turn"
 
 class CrprMCPServer:
     _DISCOVERY_ITEMS_PLACEHOLDER = "{{DISCOVERY_ITEMS}}"
@@ -68,6 +70,8 @@ class CrprMCPServer:
         self.context_lifecycle = ContextLifecycleManager(
             zoekt_api_url=self.config.zoekt_api_url,
         )
+        self._turn_context_cache: dict[tuple[str, str], tuple[str, str, int, str, str, str]] = {}
+        self._turn_context_cache_max = 512
 
     def _load_tool_descriptions(self) -> None:
         self.list_capabilities_description = self._tool_description_with_default(
@@ -187,9 +191,20 @@ class CrprMCPServer:
         try:
             workflow_id, args = self.execution_runner.parse_workflow_cli_command(request.command)
             extra_env: dict[str, str] = {}
+            pr_identity = self._resolve_thread_pr_identity_from_headers()
+            turn_cache_key = self._resolve_thread_turn_cache_key_from_headers()
+
+            if pr_identity is not None:
+                owner, repo, pr_number = pr_identity
+                extra_env.update(
+                    {
+                        "CRPR_CONTEXT_OWNER": owner,
+                        "CRPR_CONTEXT_REPO": repo,
+                        "CRPR_CONTEXT_PR_NUMBER": str(pr_number),
+                    }
+                )
 
             if self.execution_runner.workflow_requires_pr_scope(workflow_id):
-                pr_identity = self._resolve_thread_pr_identity_from_headers()
                 if pr_identity is None:
                     return self._format_execution_result_markdown(
                         "Workflow CLI Execution",
@@ -200,14 +215,20 @@ class CrprMCPServer:
                     )
 
                 owner, repo, pr_number = pr_identity
-                resolved_context = await self.context_lifecycle.ensure_pr_context(
+                cached_context_env = self._read_turn_cached_context_env(
+                    cache_key=turn_cache_key,
                     owner=owner,
                     repo=repo,
                     pr_number=pr_number,
-                    wait=True,
                 )
-                extra_env.update(
-                    {
+                if cached_context_env is None:
+                    resolved_context = await self.context_lifecycle.ensure_pr_context(
+                        owner=owner,
+                        repo=repo,
+                        pr_number=pr_number,
+                        wait=True,
+                    )
+                    cached_context_env = {
                         "CRPR_CONTEXT_ID": resolved_context.context_id,
                         "CRPR_CONTEXT_OWNER": resolved_context.owner,
                         "CRPR_CONTEXT_REPO": resolved_context.repo,
@@ -215,6 +236,15 @@ class CrprMCPServer:
                         "CRPR_CONTEXT_ANCHOR_CREATED_AT": resolved_context.anchor_created_at,
                         "CRPR_CONTEXT_MANIFEST_PATH": resolved_context.manifest_path,
                     }
+                    self._write_turn_cached_context_env(
+                        cache_key=turn_cache_key,
+                        owner=owner,
+                        repo=repo,
+                        pr_number=pr_number,
+                        context_env=cached_context_env,
+                    )
+                extra_env.update(
+                    cached_context_env
                 )
 
             result = await self.execution_runner.run_workflow_script(
@@ -313,6 +343,72 @@ class CrprMCPServer:
         if not owner or not repo or pr_number <= 0:
             return None
         return owner, repo, pr_number
+
+    @staticmethod
+    def _resolve_thread_turn_cache_key_from_headers() -> tuple[str, str] | None:
+        headers = get_http_headers(include_all=True)
+        thread_id = str(headers.get(HEADER_THREAD_ID, "")).strip()
+        turn_id = str(headers.get(HEADER_THREAD_TURN, "")).strip()
+        if not thread_id or not turn_id:
+            return None
+        return thread_id, turn_id
+
+    def _read_turn_cached_context_env(
+        self,
+        *,
+        cache_key: tuple[str, str] | None,
+        owner: str,
+        repo: str,
+        pr_number: int,
+    ) -> dict[str, str] | None:
+        if cache_key is None:
+            return None
+        cached = self._turn_context_cache.get(cache_key)
+        if cached is None:
+            return None
+        cached_owner, cached_repo, cached_pr_number, context_id, anchor_created_at, manifest_path = cached
+        if (
+            str(cached_owner).strip() != str(owner).strip()
+            or str(cached_repo).strip() != str(repo).strip()
+            or int(cached_pr_number) != int(pr_number)
+        ):
+            return None
+        return {
+            "CRPR_CONTEXT_ID": context_id,
+            "CRPR_CONTEXT_OWNER": cached_owner,
+            "CRPR_CONTEXT_REPO": cached_repo,
+            "CRPR_CONTEXT_PR_NUMBER": str(cached_pr_number),
+            "CRPR_CONTEXT_ANCHOR_CREATED_AT": anchor_created_at,
+            "CRPR_CONTEXT_MANIFEST_PATH": manifest_path,
+        }
+
+    def _write_turn_cached_context_env(
+        self,
+        *,
+        cache_key: tuple[str, str] | None,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        context_env: dict[str, str],
+    ) -> None:
+        if cache_key is None:
+            return
+        context_id = str(context_env.get("CRPR_CONTEXT_ID", "")).strip()
+        anchor_created_at = str(context_env.get("CRPR_CONTEXT_ANCHOR_CREATED_AT", "")).strip()
+        manifest_path = str(context_env.get("CRPR_CONTEXT_MANIFEST_PATH", "")).strip()
+        if not context_id:
+            return
+        self._turn_context_cache[cache_key] = (
+            str(owner).strip(),
+            str(repo).strip(),
+            int(pr_number),
+            context_id,
+            anchor_created_at,
+            manifest_path,
+        )
+        while len(self._turn_context_cache) > self._turn_context_cache_max:
+            oldest_key = next(iter(self._turn_context_cache))
+            self._turn_context_cache.pop(oldest_key, None)
 
     @staticmethod
     def _format_capability_error_markdown(capability_id: str, message: str) -> str:
