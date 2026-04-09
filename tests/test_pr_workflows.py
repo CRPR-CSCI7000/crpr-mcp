@@ -69,7 +69,14 @@ def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
         module.github_tools,
         "list_pull_request_files",
         lambda: [
-            {"filename": "src/retry.py", "status": "modified", "additions": 10, "deletions": 2, "changes": 12},
+            {
+                "filename": "src/retry.py",
+                "status": "modified",
+                "additions": 10,
+                "deletions": 2,
+                "changes": 12,
+                "patch": "@@ -10,2 +10,5 @@ def retry_once():\n old_line\n+new_line",
+            },
             {
                 "filename": "tests/test_retry.py",
                 "status": "renamed",
@@ -77,6 +84,7 @@ def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
                 "additions": 5,
                 "deletions": 2,
                 "changes": 7,
+                "patch": "@@ -1,0 +1,3 @@\n+def test_retry():\n+    assert True",
             },
         ],
     )
@@ -98,3 +106,8 @@ def test_pr_impact_assessment_output_shape(monkeypatch, capsys) -> None:
     assert isinstance(payload["largest_files"], list)
     assert isinstance(payload["files"], list)
     assert payload["files"][1]["previous_filename"] == "tests/retry_old.py"
+    assert payload["files"][0]["has_patch"] is True
+    assert payload["files"][0]["hunk_starts"] == [10]
+    assert payload["files"][0]["changed_ranges_new"] == [{"start_line": 10, "end_line": 14}]
+    assert payload["files"][1]["hunk_starts"] == [1]
+    assert payload["files"][1]["changed_ranges_new"] == [{"start_line": 1, "end_line": 3}]

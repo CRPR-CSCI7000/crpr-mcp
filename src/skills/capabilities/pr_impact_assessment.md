@@ -26,7 +26,7 @@ execution:
 
 ### Description
 Retrieves PR metadata and changed files from GitHub, then computes compact file summaries and
-impact aggregates (status mix, directories, extensions, and largest deltas) in one response.
+impact aggregates (status mix, directories, extensions, largest deltas, and patch hunk anchors when available) in one response.
 
 
 ### Arg Usage
@@ -38,6 +38,7 @@ impact aggregates (status mix, directories, extensions, and largest deltas) in o
 1. `pr_impact_assessment`
 ### Constraints
 - Returns compact file metadata and impact aggregates, not full patches.
+- Hunk anchors are derived from GitHub file `patch` headers and may be missing for binary/large/truncated diff entries.
 
 ### Expected Output Summary
 Returns markdown to the agent; key structured fields in that output include:

@@ -53,7 +53,18 @@ class ZoektRuntime:
             raise ZoektRuntimeError("invalid line range")
 
         end_line = min(end_line, start_line + MAX_FETCH_WINDOW_LINES - 1)
+        all_lines = self.fetch_file_lines(repo=repo, path=path)
 
+        start_index = start_line - 1
+        end_index = min(len(all_lines), end_line)
+
+        if start_index >= len(all_lines):
+            return ""
+
+        selected = all_lines[start_index:end_index]
+        return "\n".join(selected)
+
+    def fetch_file_lines(self, repo: str, path: str) -> list[str]:
         params = {
             "r": _clean_repository_path(repo),
             "f": path,
@@ -70,18 +81,9 @@ class ZoektRuntime:
                 raise ZoektRuntimeError(f"/print request failed with status {status_code}: {body}") from exc
             raise ZoektRuntimeError(f"/print request failed with status {status_code}") from exc
         all_lines = _extract_lines_from_html(response.text)
-
         if not all_lines:
             raise ZoektRuntimeError("file not found or unreadable")
-
-        start_index = start_line - 1
-        end_index = min(len(all_lines), end_line)
-
-        if start_index >= len(all_lines):
-            return ""
-
-        selected = all_lines[start_index:end_index]
-        return "\n".join(selected)
+        return all_lines
 
     def list_dir(self, repo: str, path: str = "", depth: int = 2) -> str:
         clean_repo = _clean_repository_path(repo)
@@ -182,6 +184,10 @@ def normalize_repo(value: str) -> str:
 
 def fetch_content(repo: str, path: str, start_line: int, end_line: int) -> str:
     return _get_runtime().fetch_content(repo=repo, path=path, start_line=start_line, end_line=end_line)
+
+
+def fetch_file_lines(repo: str, path: str) -> list[str]:
+    return _get_runtime().fetch_file_lines(repo=repo, path=path)
 
 
 def list_dir(repo: str, path: str = "", depth: int = 2) -> str:

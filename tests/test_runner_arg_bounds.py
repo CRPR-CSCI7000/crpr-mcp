@@ -24,9 +24,6 @@ execution:
     term:
       type: string
       required: false
-    raw_query:
-      type: string
-      required: false
     repo:
       type: string
       required: false
@@ -65,9 +62,90 @@ class OutputModel(BaseModel):
     )
 
 
+def _write_cross_repo_grep_skill(skills_root: Path) -> None:
+    skill_path = skills_root / "capabilities" / "cross_repo_grep.md"
+    script_path = skills_root / "workflows" / "scripts" / "cross_repo_grep.py"
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    skill_path.write_text(
+        """---
+id: cross_repo_grep
+doc_type: capability
+kind: workflow
+order: 1
+execution:
+  script_path: skills/workflows/scripts/cross_repo_grep.py
+  arg_schema:
+    regexp:
+      type: string
+      required: true
+      position: 1
+      aliases: ["-e", "--regexp"]
+    path:
+      type: string
+      required: true
+      position: 2
+    ignore_case:
+      type: boolean
+      required: false
+      default: false
+      aliases: ["-i"]
+    line_number:
+      type: boolean
+      required: false
+      default: false
+      aliases: ["-n"]
+    context_lines:
+      type: integer
+      required: false
+      default: 0
+      minimum: 0
+      maximum: 50
+      aliases: ["-C"]
+---
+
+--- list_capabilities ---
+- Summary: test
+- When to use: test
+
+--- read_capability ---
+## test
+### Expected Output Summary
+Returns a JSON object with:
+{{EXPECTED_OUTPUT_SUMMARY}}
+""",
+        encoding="utf-8",
+    )
+    script_path.write_text(
+        """from pydantic import BaseModel
+
+
+class OutputModel(BaseModel):
+    ok: bool
+""",
+        encoding="utf-8",
+    )
+
+
 def _build_runner(tmp_path: Path) -> ExecutionRunner:
     skills_root = tmp_path / "skills"
     _write_skill(skills_root)
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    (runtime_root / "__init__.py").write_text("", encoding="utf-8")
+    return ExecutionRunner(
+        src_root=tmp_path,
+        skills_root=skills_root,
+        timeout_default=30,
+        timeout_max=120,
+        stdout_max_bytes=32768,
+        stderr_max_bytes=32768,
+    )
+
+
+def _build_cross_repo_grep_runner(tmp_path: Path) -> ExecutionRunner:
+    skills_root = tmp_path / "skills"
+    _write_cross_repo_grep_skill(skills_root)
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir(parents=True, exist_ok=True)
     (runtime_root / "__init__.py").write_text("", encoding="utf-8")
@@ -115,11 +193,11 @@ def test_parse_workflow_cli_normalizes_over_escaped_double_quotes(tmp_path: Path
     runner = _build_runner(tmp_path)
 
     workflow_id, args = runner.parse_workflow_cli_command(
-        'symbol_usage --raw-query \\"enqueueInvoice r:github.com/acme/ui\\" --context-lines 1'
+        'symbol_usage --term \\"enqueueInvoice r:github.com/acme/ui\\" --context-lines 1'
     )
 
     assert workflow_id == "symbol_usage"
-    assert args["raw_query"] == "enqueueInvoice r:github.com/acme/ui"
+    assert args["term"] == "enqueueInvoice r:github.com/acme/ui"
     assert args["context_lines"] == 1
 
 
@@ -127,7 +205,7 @@ def test_parse_workflow_cli_adds_hint_for_split_value_from_over_escaped_quotes(t
     runner = _build_runner(tmp_path)
 
     with pytest.raises(ValueError, match="over-escaped quotes"):
-        runner.parse_workflow_cli_command('symbol_usage --raw-query \\"enqueueInvoice r:github.com/acme/ui --context-lines 1')
+        runner.parse_workflow_cli_command('symbol_usage --term \\"enqueueInvoice r:github.com/acme/ui --context-lines 1')
 
 
 def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
@@ -135,13 +213,13 @@ def test_build_cli_argv_tokens_normalizes_flags_and_values() -> None:
         {
             "expand_variants": False,
             "context_lines": 1,
-            "raw_query": "enqueueInvoice r:github.com/acme/ui",
+            "term": "enqueueInvoice r:github.com/acme/ui",
         }
     )
 
     assert "--expand-variants" in argv
     assert "--context-lines" in argv
-    assert "--raw-query" in argv
+    assert "--term" in argv
     assert "false" in argv
     assert "1" in argv
     assert "enqueueInvoice r:github.com/acme/ui" in argv
@@ -275,3 +353,53 @@ def test_run_workflow_script_passes_args_through_to_subprocess(tmp_path: Path, m
     assert "--thread-owner" in bootstrap
     assert "--thread-repo" in bootstrap
     assert "--thread-pr-number" in bootstrap
+
+
+def test_parse_workflow_cli_accepts_positional_args_for_workflow(tmp_path: Path) -> None:
+    runner = _build_cross_repo_grep_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command('cross_repo_grep "send_event" src/app.py')
+
+    assert workflow_id == "cross_repo_grep"
+    assert args["regexp"] == "send_event"
+    assert args["path"] == "src/app.py"
+    assert args["context_lines"] == 0
+
+
+def test_parse_workflow_cli_accepts_short_boolean_and_short_value_flags(tmp_path: Path) -> None:
+    runner = _build_cross_repo_grep_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command('cross_repo_grep -in -C 5 "send_event" src/app.py')
+
+    assert workflow_id == "cross_repo_grep"
+    assert args["ignore_case"] is True
+    assert args["line_number"] is True
+    assert args["context_lines"] == 5
+
+
+def test_parse_workflow_cli_accepts_compact_short_value_flag(tmp_path: Path) -> None:
+    runner = _build_cross_repo_grep_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command('cross_repo_grep -C5 "send_event" src/app.py')
+
+    assert workflow_id == "cross_repo_grep"
+    assert args["context_lines"] == 5
+
+
+def test_parse_workflow_cli_accepts_long_boolean_without_explicit_value(tmp_path: Path) -> None:
+    runner = _build_cross_repo_grep_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command('cross_repo_grep --ignore-case "send_event" src/app.py')
+
+    assert workflow_id == "cross_repo_grep"
+    assert args["ignore_case"] is True
+
+
+def test_parse_workflow_cli_accepts_terminator_for_dash_prefixed_pattern(tmp_path: Path) -> None:
+    runner = _build_cross_repo_grep_runner(tmp_path)
+
+    workflow_id, args = runner.parse_workflow_cli_command("cross_repo_grep -- -foo src/app.py")
+
+    assert workflow_id == "cross_repo_grep"
+    assert args["regexp"] == "-foo"
+    assert args["path"] == "src/app.py"

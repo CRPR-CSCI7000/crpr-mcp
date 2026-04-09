@@ -85,13 +85,9 @@ def test_read_capability_symbol_usage_zoekt_first_contract(monkeypatch) -> None:
 
     assert "### Arg Usage" in markdown
     assert "--term <string>" in markdown
-    assert "--raw-query <string>" in markdown
-    assert "| `--term` | `string` | No | N/A | Usage term for structured mode query composition. |" in markdown
-    assert (
-        "| `--raw-query` | `string` | No | N/A | "
-        "Raw Zoekt query for direct execution (bypasses structured mode). |" in markdown
-    )
-    assert "Exactly one of `term` or `raw_query` is required." in markdown
+    assert "--raw-query <string>" not in markdown
+    assert "| `--term` | `N/A` | `N/A` | `string` | Yes | N/A | Usage term for structured query composition. |" in markdown
+    assert "`term` is required." in markdown
     assert (
         "1. `symbol_usage --term enqueueInvoice --repo github.com/acme/ui "
         "--lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`" in markdown
@@ -109,7 +105,7 @@ def test_read_capability_symbol_definition_structured_only_contract(monkeypatch)
     assert "--term <string>" in markdown
     assert "--query" not in markdown
     assert (
-        "| `--term` | `string` | Yes | N/A | "
+        "| `--term` | `N/A` | `N/A` | `string` | Yes | N/A | "
         "Symbol term for structured definition query composition. |" in markdown
     )
     assert "Structured mode only; raw query passthrough is not supported." in markdown

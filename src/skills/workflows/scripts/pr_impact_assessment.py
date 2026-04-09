@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -10,6 +11,7 @@ from runtime import context as runtime_context
 from runtime import github_tools
 
 RESULT_MARKER = "__RESULT_JSON__="
+_HUNK_HEADER_RE = re.compile(r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@")
 
 
 class OutputModel(BaseModel):
@@ -67,6 +69,26 @@ def _top_counts(counter: Counter[str], limit: int = 8, key_label: str = "name") 
     return [{key_label: key, "count": count} for key, count in counter.most_common(limit)]
 
 
+def _parse_patch_hunk_anchors(patch: str) -> tuple[list[int], list[dict[str, int]]]:
+    anchors: list[int] = []
+    ranges: list[dict[str, int]] = []
+    for line in patch.splitlines():
+        match = _HUNK_HEADER_RE.match(line.strip())
+        if match is None:
+            continue
+
+        new_start = int(match.group("new_start"))
+        new_count_raw = match.group("new_count")
+        new_count = int(new_count_raw) if new_count_raw else 1
+        new_count = max(0, new_count)
+        start_line = new_start
+        end_line = new_start if new_count == 0 else (new_start + new_count - 1)
+
+        anchors.append(new_start)
+        ranges.append({"start_line": start_line, "end_line": end_line})
+    return anchors, ranges
+
+
 async def main():
     try:
         parse_args()
@@ -94,6 +116,8 @@ async def main():
             changes = int(file_info.get("changes", additions + deletions) or (additions + deletions))
             directory = _directory(filename)
             extension = _file_extension(filename)
+            patch = str(file_info.get("patch", "") or "")
+            hunk_starts, changed_ranges_new = _parse_patch_hunk_anchors(patch) if patch else ([], [])
 
             status_counts.update([status])
             directory_counts.update([directory])
@@ -110,6 +134,9 @@ async def main():
                     "additions": additions,
                     "deletions": deletions,
                     "changes": changes,
+                    "has_patch": bool(patch),
+                    "hunk_starts": hunk_starts,
+                    "changed_ranges_new": changed_ranges_new,
                 }
             )
 

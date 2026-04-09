@@ -13,7 +13,7 @@ execution:
 --- list_capabilities ---
 - Kind: `execution_pattern`
 - Summary: Fallback path for one-off tasks not covered by workflows.
-- When to use: Use only when no prebuilt workflow can satisfy the objective, and only after calling read_capability for this id to confirm constraints.
+- When to use: Use only when no prebuilt workflow can satisfy the task, and only after calling read_capability for this id to confirm constraints.
 - Next step: `read_capability(capability_id="execution.run_custom_workflow_code")`
 - Interface details intentionally omitted here; use `read_capability`.
 

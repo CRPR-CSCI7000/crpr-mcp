@@ -26,7 +26,6 @@ class OutputModel(BaseModel):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Find usage call-sites with Zoekt-native queries.")
     parser.add_argument("--term")
-    parser.add_argument("--raw-query")
     parser.add_argument("--repo")
     parser.add_argument("--lang")
     parser.add_argument("--path")
@@ -193,7 +192,6 @@ async def main():
     try:
         cli = parse_args()
         term = _clean(cli.term)
-        raw_query = _clean(cli.raw_query)
         repo = zoekt_tools.normalize_repo(_clean(cli.repo))
         lang = _clean(cli.lang)
         path = _clean(cli.path)
@@ -206,35 +204,25 @@ async def main():
             raise ValueError("limit must be > 0")
         if context_lines < 0 or context_lines > MAX_CONTEXT_LINES:
             raise ValueError(f"context_lines must be between 0 and {MAX_CONTEXT_LINES}")
+        if not term:
+            raise ValueError("missing required arg: term")
 
-        if term and raw_query:
-            raise ValueError("`term` and `raw_query` are mutually exclusive")
-        if not term and not raw_query:
-            raise ValueError("one of `term` or `raw_query` is required")
-
-        mode = "raw" if raw_query else "structured"
-        if mode == "raw":
-            if repo or lang or path or exclude_path or expand_variants:
-                raise ValueError(
-                    "raw_query mode does not accept repo/lang/path/exclude_path/expand_variants; use structured mode"
-                )
-            query_plan: list[tuple[str, str]] = [("raw", raw_query)]
-        else:
-            term_variants = _build_term_variants(term, expand_variants)
-            query_plan = []
-            seen_queries: set[str] = set()
-            for variant_label, variant_term in term_variants:
-                query = _build_structured_query(
-                    term=variant_term,
-                    repo=repo,
-                    lang=lang,
-                    path=path,
-                    exclude_path=exclude_path,
-                )
-                if query in seen_queries:
-                    continue
-                seen_queries.add(query)
-                query_plan.append((variant_label, query))
+        mode = "structured"
+        term_variants = _build_term_variants(term, expand_variants)
+        query_plan = []
+        seen_queries: set[str] = set()
+        for variant_label, variant_term in term_variants:
+            query = _build_structured_query(
+                term=variant_term,
+                repo=repo,
+                lang=lang,
+                path=path,
+                exclude_path=exclude_path,
+            )
+            if query in seen_queries:
+                continue
+            seen_queries.add(query)
+            query_plan.append((variant_label, query))
 
         attempted_queries: list[dict[str, object]] = []
         collected_results: list[object] = []
@@ -258,7 +246,6 @@ async def main():
             "mode": mode,
             "input": {
                 "term": term,
-                "raw_query": raw_query,
                 "repo": repo,
                 "lang": lang,
                 "path": path,

@@ -46,6 +46,7 @@ def format_workflow_result_markdown(workflow_id: str, result: ExecutionResult) -
         "symbol_definition": _render_symbol_search_result,
         "symbol_usage": _render_symbol_usage_result,
         "file_context_reader": _render_file_context_result,
+        "cross_repo_grep": _render_cross_repo_grep_result,
         "pr_impact_assessment": _render_pr_impact_assessment_result,
     }
     renderer = workflow_renderers.get(workflow_id, _render_generic_workflow_result)
@@ -78,24 +79,38 @@ def _render_repo_discovery_result(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return _render_generic_workflow_result(payload)
 
-    query = str(payload.get("query", "")).strip()
+    term = str(payload.get("term", "")).strip()
+    repo_prefix = str(payload.get("repo_prefix", "")).strip()
+    query = str(payload.get("search_query", "")).strip()
+    summary_target = query or "indexed repositories"
     repositories = payload.get("repositories") if isinstance(payload.get("repositories"), list) else []
-    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+    total_hits = _coerce_int(payload.get("total_hits"), default=0)
 
     lines = [
-        f"Found `{len(repositories)}` repositories for `{query}`."
-        if query
-        else f"Found `{len(repositories)}` repositories.",
+        f"Found `{len(repositories)}` repositories for `{summary_target}`.",
+        f"- Input term: `{term}`" if term else "- Input term: `(empty)`",
+        f"- Repo prefix filter: `{repo_prefix}`" if repo_prefix else "- Repo prefix filter: `(none)`",
+        f"- Raw repository hits: `{total_hits}`",
         "",
     ]
-    if repositories:
+    if candidates:
+        lines.append("### Repository Candidates")
+        for index, entry in enumerate(candidates[:15], start=1):
+            if not isinstance(entry, dict):
+                lines.append(f"{index}. `{_stringify_scalar(entry)}`")
+                continue
+            repository = str(entry.get("repository", "")).strip() or "(unknown)"
+            hit_count = _coerce_int(entry.get("hit_count"), default=0)
+            lines.append(f"{index}. `{repository}` (`{hit_count}` hits)")
+        if len(candidates) > 15:
+            lines.append(f"... and `{len(candidates) - 15}` more repositories.")
+    elif repositories:
         lines.append("### Repositories")
         lines.extend([f"{index}. `{repo}`" for index, repo in enumerate(repositories, start=1)])
     else:
         lines.append("No repositories found.")
-
-    if results:
-        lines.extend(["", "### Top Matches", *_render_search_results(results)])
+        lines.extend(_no_results_guidance("repo_discovery"))
     return lines
 
 
@@ -112,6 +127,7 @@ def _render_symbol_search_result(payload: Any) -> list[str]:
         lines.extend(_render_search_results(results))
     else:
         lines.append("No matches found.")
+        lines.extend(_no_results_guidance("symbol_definition"))
     return lines
 
 
@@ -149,6 +165,7 @@ def _render_symbol_usage_result(payload: Any) -> list[str]:
         lines.extend(["", "### Top Matches", *_render_search_results(results)])
     else:
         lines.extend(["", "No matches found."])
+        lines.extend(_no_results_guidance("symbol_usage"))
     return lines
 
 
@@ -187,6 +204,68 @@ def _render_file_context_result(payload: Any) -> list[str]:
     language = _language_from_path(path)
     numbered_code = _with_line_numbers(content, start_line=start_line)
     lines.extend([f"```{language}", numbered_code, "```"])
+    return lines
+
+
+def _render_cross_repo_grep_result(payload: Any) -> list[str]:
+    if not isinstance(payload, dict):
+        return _render_generic_workflow_result(payload)
+
+    repo = str(payload.get("repo", "")).strip()
+    path = str(payload.get("path", "")).strip()
+    pattern = str(payload.get("pattern", "")).strip()
+    total_matches = _coerce_int(payload.get("total_matches"), default=0)
+    max_count = _coerce_int(payload.get("max_count"), default=0)
+    reached_max_count = bool(payload.get("reached_max_count", False))
+    evidence_origin = str(payload.get("evidence_origin", "")).strip() or "zoekt_index"
+    warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
+    matches = payload.get("matches") if isinstance(payload.get("matches"), list) else []
+    line_number = bool(payload.get("line_number", False))
+
+    if repo:
+        target = f"`{repo}`"
+        if path:
+            target = f"`{repo}` filtered by `f:{path}`"
+    else:
+        target = "`indexed repositories in current context`"
+        if path:
+            target = f"`indexed repositories in current context` filtered by `f:{path}`"
+    lines = [
+        f"Searched {target} for pattern `{pattern}`." if pattern else f"Searched {target}.",
+        f"- Matches: `{total_matches}`",
+        f"- Evidence origin: `{evidence_origin}`",
+    ]
+    lines.append(f"- Repo filter: `{repo}`" if repo else "- Repo filter: `(none)`")
+    if max_count > 0:
+        lines.append(f"- Max count: `{max_count}`")
+    if reached_max_count and max_count > 0:
+        lines.append("- Result set reached `max_count`; additional matches may exist.")
+    if warnings:
+        lines.append(f"- Warnings: `{len(warnings)}`")
+    lines.append("")
+
+    if warnings:
+        lines.append("### Warnings")
+        for warning in warnings[:10]:
+            lines.append(f"- {warning}")
+        lines.append("")
+
+    if not matches:
+        lines.append("No matches found.")
+        lines.extend(_no_results_guidance("cross_repo_grep"))
+        return lines
+
+    lines.append("### Grep Output")
+    lines.append("```text")
+    grep_lines = _render_cross_repo_grep_lines(matches[:25], line_number=line_number)
+    if grep_lines:
+        lines.extend(grep_lines)
+    else:
+        lines.append("(no grep lines)")
+    lines.append("```")
+
+    if len(matches) > 25:
+        lines.append(f"... and `{len(matches) - 25}` more matches.")
     return lines
 
 
@@ -249,7 +328,14 @@ def _render_pr_impact_assessment_result(payload: Any) -> list[str]:
             if isinstance(entry, dict):
                 filename = str(entry.get("filename", "(unknown)"))
                 changes = _coerce_int(entry.get("changes"), 0)
-                lines.append(f"- `{filename}`: `{changes}` changes")
+                hunk_starts = entry.get("hunk_starts") if isinstance(entry.get("hunk_starts"), list) else []
+                anchors = [
+                    f"L{_coerce_int(value, 0)}"
+                    for value in hunk_starts[:6]
+                    if _coerce_int(value, 0) > 0
+                ]
+                anchor_suffix = f" | anchors `{', '.join(anchors)}`" if anchors else ""
+                lines.append(f"- `{filename}`: `{changes}` changes{anchor_suffix}")
 
     removed_top = [
         entry
@@ -360,6 +446,84 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _render_cross_repo_grep_lines(matches: list[Any], *, line_number: bool) -> list[str]:
+    rendered: list[str] = []
+    for index, entry in enumerate(matches):
+        if not isinstance(entry, dict):
+            rendered.append(_stringify_scalar(entry))
+            continue
+
+        match_repo = str(entry.get("repository", "")).strip()
+        match_path = str(entry.get("path", "")).strip()
+        location = "/".join(part for part in [match_repo, match_path] if part) or "(unknown)"
+        anchor = _coerce_int(entry.get("line_number"), default=1)
+        start_line = _coerce_int(entry.get("start_line"), default=anchor)
+        snippet = str(entry.get("text", ""))
+        snippet_lines = snippet.splitlines() if snippet else [""]
+        has_context = len(snippet_lines) > 1
+
+        for offset, text in enumerate(snippet_lines):
+            current_line = start_line + offset
+            is_anchor = current_line == anchor
+            if line_number:
+                if is_anchor:
+                    rendered.append(f"{location}:{current_line}:{text}")
+                else:
+                    rendered.append(f"{location}-{current_line}-{text}")
+            else:
+                if is_anchor:
+                    rendered.append(f"{location}:{text}")
+                else:
+                    rendered.append(f"{location}-{text}")
+
+        if has_context and index < len(matches) - 1:
+            rendered.append("--")
+
+    return rendered
+
+
+def _no_results_guidance(workflow_id: str) -> list[str]:
+    lines = ["", "### Retry Guidance"]
+    if workflow_id == "cross_repo_grep":
+        lines.extend(
+            [
+                "- Try alternate naming forms (`snake_case`, `camelCase`, `kebab-case`, plural/singular).",
+                "- For API paths, try partial route fragments (for example `v1/orders`, `orders`, `checkout`) rather than only full path strings.",
+                "- Search related contract tokens: event/topic names, queue keys, payload field names, schema/type names.",
+                "- Relax narrow filters (`--repo`, `--path`) and rerun before concluding there is no downstream consumer.",
+            ]
+        )
+        return lines
+    if workflow_id == "symbol_usage":
+        lines.extend(
+            [
+                "- Retry with `expand_variants=true` and add contract tokens (routes, event names, payload fields, schema names).",
+                "- Try searching related helper/adapter names that may wrap the upstream function.",
+                "- Relax strict repo/path filters before concluding there are no downstream usages.",
+            ]
+        )
+        return lines
+    if workflow_id == "symbol_definition":
+        lines.extend(
+            [
+                "- Retry with casing/word-form variants and nearby type/interface names.",
+                "- Add/remove language or path filters to avoid over-constraining the query.",
+                "- Search associated contract tokens if definitions are generated or wrapped.",
+            ]
+        )
+        return lines
+    if workflow_id == "repo_discovery":
+        lines.extend(
+            [
+                "- Use concrete code tokens in `--term` (identifiers, route fragments, event/topic names), not natural-language intent.",
+                "- Try multiple related tokens in one query and/or narrow with `--repo-prefix`.",
+                "- Retry with alternate contract tokens before concluding no candidate repos exist.",
+            ]
+        )
+        return lines
+    return lines
 
 
 def _stringify_scalar(value: Any) -> str:

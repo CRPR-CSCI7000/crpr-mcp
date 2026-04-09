@@ -99,38 +99,7 @@ def test_symbol_usage_structured_normalizes_repo_input(monkeypatch, capsys) -> N
     assert payload["input"]["repo"] == "github.com/example-labs/invoice_ui_demo"
 
 
-def test_symbol_usage_raw_query_bypasses_builder(monkeypatch, capsys) -> None:
-    module = _load_script_module("symbol_usage.py")
-    raw_query = "r:github.com/acme/ui enqueueInvoice lang:javascript -f:test"
-    _set_cli_args(
-        module,
-        monkeypatch,
-        {
-            "raw_query": raw_query,
-            "limit": 8,
-            "context_lines": 1,
-        },
-    )
-
-    query_log: list[str] = []
-    monkeypatch.setattr(
-        module.zoekt_tools,
-        "search",
-        lambda query, limit, context_lines: query_log.append(query) or [],
-    )
-
-    exit_code = asyncio.run(module.main())
-    captured = capsys.readouterr()
-    payload = _parse_result_payload(module, captured.out)
-
-    assert exit_code == 0
-    assert query_log == [raw_query]
-    assert payload["mode"] == "raw"
-    assert payload["input"]["raw_query"] == raw_query
-    assert payload["total_queries"] == 1
-
-
-def test_symbol_usage_requires_term_or_raw_query(monkeypatch, capsys) -> None:
+def test_symbol_usage_requires_term(monkeypatch, capsys) -> None:
     module = _load_script_module("symbol_usage.py")
     _set_cli_args(module, monkeypatch, {"limit": 5})
 
@@ -138,7 +107,7 @@ def test_symbol_usage_requires_term_or_raw_query(monkeypatch, capsys) -> None:
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "symbol_usage failed: one of `term` or `raw_query` is required" in captured.out
+    assert "symbol_usage failed: missing required arg: term" in captured.out
 
 
 def test_symbol_usage_variant_expansion_is_opt_in(monkeypatch, capsys) -> None:

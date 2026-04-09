@@ -8,12 +8,8 @@ execution:
   arg_schema:
     term:
       type: string
-      required: false
-      description: Usage term for structured mode query composition.
-    raw_query:
-      type: string
-      required: false
-      description: Raw Zoekt query for direct execution (bypasses structured mode).
+      required: true
+      description: Usage term for structured query composition.
     repo:
       type: string
       required: false
@@ -46,13 +42,12 @@ execution:
       type: boolean
       required: false
       default: false
-      description: Expand term into deterministic casing/plural variants (structured mode
-        only).
+      description: Expand term into deterministic casing/plural variants.
 ---
 
 --- list_capabilities ---
 - Kind: `workflow`
-- Summary: Locate call-sites with Zoekt-native structured filters or raw query override.
+- Summary: Locate call-sites with structured Zoekt filters.
 - When to use: Use after definitions are known and before reading file ranges directly.
 - Next step: `read_capability(capability_id="symbol_usage")`
 - Interface details intentionally omitted here; use `read_capability`.
@@ -67,10 +62,7 @@ execution:
 - `execution_pattern`: guidance capabilities for execution interfaces (prefix `execution.*`).
 
 ### Description
-Runs Zoekt usage search in one of two modes:
-- structured mode: build query from `term` and optional Zoekt filters.
-- raw mode: pass `raw_query` directly.
-Exactly one of `term` or `raw_query` is required.
+Runs structured Zoekt usage search by building a query from `term` and optional filters.
 
 
 ### Arg Usage
@@ -80,14 +72,15 @@ Exactly one of `term` or `raw_query` is required.
 {{ARG_TABLE}}
 ### Examples
 1. `symbol_usage --term enqueueInvoice --repo github.com/acme/ui --lang javascript --path src/actions --exclude-path test --limit 8 --context-lines 5`
-2. `symbol_usage --term enqueue_invoice --repo github.com/acme/ui --expand-variants true --limit 8`
-3. `symbol_usage --raw-query 'r:github.com/acme/ui enqueueInvoice lang:javascript -f:test' --limit 8 --context-lines 1`
+2. `symbol_usage --term /user --repo github.com/acme/ui --expand-variants true --limit 8`
 ### Constraints
-- Exactly one of `term` or `raw_query` is required.
-- Raw mode rejects structured-only flags (`repo`, `lang`, `path`, `exclude_path`, `expand_variants`).
+- `term` is required.
 - For definitions use `symbol_definition` instead.
 - Prefer this workflow to narrow targets before `file_context_reader`.
 - `context_lines` is hard-limited to 10.
+- Do not treat zero hits for one exact term as proof of no usage.
+- If exact term returns no hits, run follow-up searches with `expand_variants=true` and with contract tokens (routes, event names, queue/topic keys, payload field names, schema/type identifiers).
+- Use `repo`/`path` filters to narrow noise, but relax overly strict filters when investigating possible downstream consumers.
 
 ### Expected Output Summary
 Returns markdown to the agent; key structured fields in that output include:

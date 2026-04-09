@@ -371,8 +371,36 @@ def _render_capability_read_doc(
 
 def _capability_arg_usage(capability_id: str, arg_schema: dict[str, Any]) -> str:
     parts: list[str] = []
+    positional_names = set()
+    positional_entries: list[tuple[int, str, dict[str, Any]]] = []
     for arg_name, schema in arg_schema.items():
         if not isinstance(arg_name, str):
+            continue
+        schema_dict = schema if isinstance(schema, dict) else {}
+        raw_position = schema_dict.get("position")
+        if raw_position is None:
+            continue
+        try:
+            position = int(raw_position)
+        except (TypeError, ValueError):
+            continue
+        if position <= 0:
+            continue
+        positional_names.add(arg_name)
+        positional_entries.append((position, arg_name, schema_dict))
+    positional_entries.sort(key=lambda entry: (entry[0], entry[1]))
+    for _, arg_name, schema_dict in positional_entries:
+        value_type = str(schema_dict.get("type", "value")).strip().lower() or "value"
+        value_fragment = f"<{value_type}>"
+        if schema_dict.get("required"):
+            parts.append(value_fragment)
+        else:
+            parts.append(f"[{value_fragment}]")
+
+    for arg_name, schema in arg_schema.items():
+        if not isinstance(arg_name, str):
+            continue
+        if arg_name in positional_names:
             continue
         schema_dict = schema if isinstance(schema, dict) else {}
         flag = f"--{arg_name.replace('_', '-')}"
@@ -391,8 +419,8 @@ def _capability_arg_table(arg_schema: dict[str, Any], *, kind: str) -> str:
         return "- (none)"
 
     lines = [
-        "| Name | Type | Required | Default | Description |",
-        "| :--- | :--- | :--- | :--- | :--- |",
+        "| Name | Short | Positional | Type | Required | Default | Description |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for arg_name, schema in arg_schema.items():
@@ -405,10 +433,26 @@ def _capability_arg_table(arg_schema: dict[str, Any], *, kind: str) -> str:
         if "default" in schema_dict:
             default = f"`{repr(schema_dict.get('default'))}`"
         description = str(schema_dict.get("description", "")).strip() or "N/A"
+        short_aliases: list[str] = []
+        raw_aliases = schema_dict.get("aliases")
+        if isinstance(raw_aliases, list):
+            for raw_alias in raw_aliases:
+                if not isinstance(raw_alias, str):
+                    continue
+                alias = raw_alias.strip()
+                if re.fullmatch(r"-[A-Za-z0-9]", alias):
+                    short_aliases.append(alias)
+        short_display = ", ".join(short_aliases) if short_aliases else "N/A"
+        raw_position = schema_dict.get("position")
+        position_display = "N/A"
+        if isinstance(raw_position, int) and raw_position > 0:
+            position_display = str(raw_position)
         display_name = arg_name
         if kind == "workflow":
             display_name = f"--{arg_name.replace('_', '-')}"
         escaped_name = display_name.replace("|", "\\|")
+        escaped_short = short_display.replace("|", "\\|")
+        escaped_position = position_display.replace("|", "\\|")
         escaped_type = arg_type.replace("|", "\\|")
         escaped_description = description.replace("|", "\\|")
 
@@ -417,6 +461,8 @@ def _capability_arg_table(arg_schema: dict[str, Any], *, kind: str) -> str:
             + " | ".join(
                 [
                     f"`{escaped_name}`",
+                    f"`{escaped_short}`",
+                    f"`{escaped_position}`",
                     f"`{escaped_type}`",
                     required,
                     default,
