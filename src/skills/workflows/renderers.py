@@ -80,7 +80,7 @@ def _render_repo_discovery_result(payload: Any) -> list[str]:
         return _render_generic_workflow_result(payload)
 
     term = str(payload.get("term", "")).strip()
-    repo_prefix = str(payload.get("repo_prefix", "")).strip()
+    repo_prefix = _shorten_repo_for_display(str(payload.get("repo_prefix", "")))
     query = str(payload.get("search_query", "")).strip()
     summary_target = query or "indexed repositories"
     repositories = payload.get("repositories") if isinstance(payload.get("repositories"), list) else []
@@ -100,14 +100,19 @@ def _render_repo_discovery_result(payload: Any) -> list[str]:
             if not isinstance(entry, dict):
                 lines.append(f"{index}. `{_stringify_scalar(entry)}`")
                 continue
-            repository = str(entry.get("repository", "")).strip() or "(unknown)"
+            repository = _shorten_repo_for_display(str(entry.get("repository", ""))) or "(unknown)"
             hit_count = _coerce_int(entry.get("hit_count"), default=0)
             lines.append(f"{index}. `{repository}` (`{hit_count}` hits)")
         if len(candidates) > 15:
             lines.append(f"... and `{len(candidates) - 15}` more repositories.")
     elif repositories:
         lines.append("### Repositories")
-        lines.extend([f"{index}. `{repo}`" for index, repo in enumerate(repositories, start=1)])
+        lines.extend(
+            [
+                f"{index}. `{_shorten_repo_for_display(str(repo))}`"
+                for index, repo in enumerate(repositories, start=1)
+            ]
+        )
     else:
         lines.append("No repositories found.")
         lines.extend(_no_results_guidance("repo_discovery"))
@@ -175,7 +180,7 @@ def _render_file_context_result(payload: Any) -> list[str]:
 
     source_owner = str(payload.get("source_owner", "")).strip()
     source_repo = str(payload.get("source_repo", "")).strip()
-    repo = str(payload.get("repo", "")).strip()
+    repo = _shorten_repo_for_display(str(payload.get("repo", "")).strip())
     path = str(payload.get("path", "")).strip()
     start_line = _coerce_int(payload.get("start_line"), default=1)
     end_line = _coerce_int(payload.get("end_line"), default=start_line)
@@ -211,7 +216,7 @@ def _render_cross_repo_grep_result(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return _render_generic_workflow_result(payload)
 
-    repo = str(payload.get("repo", "")).strip()
+    repo = _shorten_repo_for_display(str(payload.get("repo", "")).strip())
     path = str(payload.get("path", "")).strip()
     pattern = str(payload.get("pattern", "")).strip()
     total_matches = _coerce_int(payload.get("total_matches"), default=0)
@@ -405,7 +410,7 @@ def _render_search_results(results: list[Any], max_files: int = 10, max_matches_
             lines.append(f"{index}. `{_stringify_scalar(entry)}`")
             continue
 
-        repository = str(entry.get("repository", "")).strip()
+        repository = _shorten_repo_for_display(str(entry.get("repository", "")).strip())
         filename = str(entry.get("filename", "")).strip()
         location = "/".join(part for part in [repository, filename] if part) or "(unknown location)"
         lines.append(f"{index}. `{location}`")
@@ -448,6 +453,13 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _shorten_repo_for_display(repo: str) -> str:
+    normalized = repo.strip()
+    if normalized.lower().startswith("github.com/"):
+        return normalized[len("github.com/") :]
+    return normalized
+
+
 def _render_cross_repo_grep_lines(matches: list[Any], *, line_number: bool) -> list[str]:
     rendered: list[str] = []
     for index, entry in enumerate(matches):
@@ -455,7 +467,7 @@ def _render_cross_repo_grep_lines(matches: list[Any], *, line_number: bool) -> l
             rendered.append(_stringify_scalar(entry))
             continue
 
-        match_repo = str(entry.get("repository", "")).strip()
+        match_repo = _shorten_repo_for_display(str(entry.get("repository", "")))
         match_path = str(entry.get("path", "")).strip()
         location = "/".join(part for part in [match_repo, match_path] if part) or "(unknown)"
         anchor = _coerce_int(entry.get("line_number"), default=1)
