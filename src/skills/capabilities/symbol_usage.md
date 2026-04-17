@@ -78,6 +78,8 @@ Runs structured Zoekt usage search by building a query from `term` and optional 
 - For definitions use `symbol_definition` instead.
 - Prefer this workflow to narrow targets before `file_context_reader`.
 - `context_lines` is hard-limited to 10.
+- For downstream breakage triage, prioritize runtime consumer call-sites/field reads (handlers/routes/services/components/parsers) first.
+- When producing findings, prioritize call-sites that imply runtime failure modes (crash, null/default behavior, silent drop) over annotation-only drift.
 - Do not treat zero hits for one exact term as proof of no usage.
 - If exact term returns no hits, run follow-up searches with `expand_variants=true` and with contract tokens (routes, event names, queue/topic keys, payload field names, schema/type identifiers).
 - Use `repo`/`path` filters to narrow noise, but relax overly strict filters when investigating possible downstream consumers.

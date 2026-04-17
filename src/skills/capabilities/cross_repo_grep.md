@@ -111,6 +111,8 @@ Interface style is a hybrid: familiar grep/rg-style flags (`-i`, `-F`, `-w`, `-n
 - Positional form is `cross_repo_grep [OPTIONS] PATTERN [PATH_FILTER]`.
 - `max_count` hard-clamped to 250.
 - Context values are bounded to 50 lines.
+- For downstream breakage triage, start by targeting runtime consumer code paths (handlers/routes/services/components/parsers) first.
+- Prefer queries that show runtime read/map behavior of changed fields before query passes over schema/reference artifacts.
 - Do not treat zero hits from one exact pattern as proof of no downstream consumers.
 - If no exact hits: retry with variant token forms (snake/camel/kebab/plural), retry with contract-surface tokens (route/event/topic/payload/schema names), and relax overly narrow `--path` filters.
 - Prefer multiple targeted grep passes over one broad natural-language phrase.

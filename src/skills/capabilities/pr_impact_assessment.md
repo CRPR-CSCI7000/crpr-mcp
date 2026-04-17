@@ -39,6 +39,7 @@ impact aggregates (status mix, directories, extensions, largest deltas, and patc
 ### Constraints
 - Returns compact file metadata and impact aggregates, not full patches.
 - Hunk anchors are derived from GitHub file `patch` headers and may be missing for binary/large/truncated diff entries.
+- Use the returned change surface to seed runtime-consumer-first downstream validation (handlers/routes/services/components/parsers).
 
 ### Expected Output Summary
 Returns markdown to the agent; key structured fields in that output include:
