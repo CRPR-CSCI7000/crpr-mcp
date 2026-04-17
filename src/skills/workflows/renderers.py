@@ -505,6 +505,7 @@ def _no_results_guidance(workflow_id: str) -> list[str]:
                 "- For API paths, try partial route fragments (for example `v1/orders`, `orders`, `checkout`) rather than only full path strings.",
                 "- Search related contract tokens: event/topic names, queue keys, payload field names, schema/type names.",
                 "- Relax narrow filters (`--repo`, `--path`) and rerun before concluding there is no downstream consumer.",
+                "- If the first pass used a narrow slice (for example one extension/path), run one broader consumer-oriented pass; when ecosystems differ, adapt tokens and consumer-surface patterns to target conventions and avoid language/extension-constrained first passes before concluding no evidence.",
             ]
         )
         return lines
@@ -514,6 +515,7 @@ def _no_results_guidance(workflow_id: str) -> list[str]:
                 "- Retry with `expand_variants=true` and add contract tokens (routes, event names, payload fields, schema names).",
                 "- Try searching related helper/adapter names that may wrap the upstream function.",
                 "- Relax strict repo/path filters before concluding there are no downstream usages.",
+                "- If the first pass was narrow, run one broader consumer-oriented pass; when ecosystems differ, adapt tokens and consumer-surface patterns to target conventions and avoid language/extension-constrained first passes before concluding no evidence.",
             ]
         )
         return lines
