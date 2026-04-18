@@ -79,17 +79,14 @@ def _render_repo_discovery_result(payload: Any) -> list[str]:
     if not isinstance(payload, dict):
         return _render_generic_workflow_result(payload)
 
-    term = str(payload.get("term", "")).strip()
     repo_prefix = _shorten_repo_for_display(str(payload.get("repo_prefix", "")))
-    query = str(payload.get("search_query", "")).strip()
-    summary_target = query or "indexed repositories"
+    summary_target = f"repo prefix `{repo_prefix}`" if repo_prefix else "indexed repositories"
     repositories = payload.get("repositories") if isinstance(payload.get("repositories"), list) else []
     candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
     total_hits = _coerce_int(payload.get("total_hits"), default=0)
 
     lines = [
         f"Found `{len(repositories)}` repositories for `{summary_target}`.",
-        f"- Input term: `{term}`" if term else "- Input term: `(empty)`",
         f"- Repo prefix filter: `{repo_prefix}`" if repo_prefix else "- Repo prefix filter: `(none)`",
         f"- Raw repository hits: `{total_hits}`",
         "",
@@ -531,9 +528,9 @@ def _no_results_guidance(workflow_id: str) -> list[str]:
     if workflow_id == "repo_discovery":
         lines.extend(
             [
-                "- Use concrete code tokens in `--term` (identifiers, route fragments, event/topic names), not natural-language intent.",
-                "- Try multiple related tokens in one query and/or narrow with `--repo-prefix`.",
-                "- Retry with alternate contract tokens before concluding no candidate repos exist.",
+                "- Provide a narrower `--repo-prefix` (for example owner/repo stem) to reduce broad listings.",
+                "- Try alternate repo naming forms (`_`/`-`, abbreviated stems, service suffixes like `-api`, `-worker`).",
+                "- Retry with owner-qualified prefixes when a bare repo stem is ambiguous.",
             ]
         )
         return lines

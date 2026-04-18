@@ -36,22 +36,21 @@ def _parse_result_payload(stdout: str) -> dict:
     raise AssertionError("result marker not found in stdout")
 
 
-def test_repo_discovery_term_search_with_repo_prefix(monkeypatch, capsys) -> None:
+def test_repo_discovery_lists_indexed_repos_with_repo_prefix(monkeypatch, capsys) -> None:
     _set_cli_args(
         monkeypatch,
         {
-            "term": "enqueue_invoice_event",
             "repo_prefix": "github.com/acme/billing",
-            "limit": 10,
         },
     )
     monkeypatch.setattr(
         repo_discovery.zoekt_tools,
-        "search",
-        lambda query, limit, context_lines: [
-            {"repository": "github.com/acme/billing-service", "filename": "", "matches": []},
-            {"repository": "github.com/acme/billing-web", "filename": "", "matches": []},
-            {"repository": "github.com/acme/billing-service", "filename": "", "matches": []},
+        "list_repos",
+        lambda: [
+            "github.com/acme/billing-service",
+            "github.com/acme/billing-web",
+            "github.com/acme/billing-service",
+            "github.com/acme/checkout",
         ],
     )
 
@@ -60,35 +59,20 @@ def test_repo_discovery_term_search_with_repo_prefix(monkeypatch, capsys) -> Non
     payload = _parse_result_payload(captured.out)
 
     assert exit_code == 0
-    assert payload["term"] == "enqueue_invoice_event"
     assert payload["repo_prefix"] == "github.com/acme/billing"
-    assert payload["search_query"] == "type:repo enqueue_invoice_event r:^github\\.com/acme/billing.*"
     assert payload["repositories"] == [
         "github.com/acme/billing-service",
         "github.com/acme/billing-web",
     ]
     assert payload["candidates"] == [
-        {"repository": "github.com/acme/billing-service", "hit_count": 2},
+        {"repository": "github.com/acme/billing-service", "hit_count": 1},
         {"repository": "github.com/acme/billing-web", "hit_count": 1},
     ]
-    assert payload["total_hits"] == 3
+    assert payload["total_hits"] == 2
 
 
-def test_repo_discovery_preserves_explicit_type_repo_prefix(monkeypatch, capsys) -> None:
-    _set_cli_args(monkeypatch, {"term": "type:repo enqueue_invoice_event", "limit": 5})
-    monkeypatch.setattr(repo_discovery.zoekt_tools, "search", lambda query, limit, context_lines: [])
-
-    exit_code = asyncio.run(repo_discovery.main())
-    captured = capsys.readouterr()
-    payload = _parse_result_payload(captured.out)
-
-    assert exit_code == 0
-    assert payload["term"] == "type:repo enqueue_invoice_event"
-    assert payload["search_query"] == "type:repo enqueue_invoice_event"
-
-
-def test_repo_discovery_returns_all_indexed_repos_when_no_term_or_prefix(monkeypatch, capsys) -> None:
-    _set_cli_args(monkeypatch, {"limit": 5})
+def test_repo_discovery_returns_all_indexed_repos_when_no_prefix(monkeypatch, capsys) -> None:
+    _set_cli_args(monkeypatch, {})
     monkeypatch.setattr(
         repo_discovery.zoekt_tools,
         "list_repos",
@@ -105,9 +89,7 @@ def test_repo_discovery_returns_all_indexed_repos_when_no_term_or_prefix(monkeyp
     payload = _parse_result_payload(captured.out)
 
     assert exit_code == 0
-    assert payload["term"] == ""
     assert payload["repo_prefix"] == ""
-    assert payload["search_query"] == ""
     assert payload["repositories"] == [
         "github.com/acme/alpha",
         "github.com/acme/beta",
@@ -133,15 +115,23 @@ def test_repo_discovery_repo_prefix_only_filters_indexed_repos(monkeypatch, caps
     payload = _parse_result_payload(captured.out)
 
     assert exit_code == 0
-    assert payload["search_query"] == ""
     assert payload["repositories"] == [
         "github.com/acme/pantry_pal_api",
         "github.com/acme/pantry_pal_worker",
     ]
 
 
+def test_repo_discovery_rejects_term_flag(monkeypatch, capsys) -> None:
+    _set_cli_args(monkeypatch, {"term": "enqueue_invoice_event"})
+
+    with pytest.raises(SystemExit):
+        asyncio.run(repo_discovery.main())
+    captured = capsys.readouterr()
+    assert "unrecognized arguments: --term" in captured.err
+
+
 def test_repo_discovery_rejects_raw_query_flag(monkeypatch, capsys) -> None:
-    _set_cli_args(monkeypatch, {"raw_query": "type:repo f:billing", "limit": 5})
+    _set_cli_args(monkeypatch, {"raw_query": "type:repo f:billing"})
 
     with pytest.raises(SystemExit):
         asyncio.run(repo_discovery.main())
@@ -150,7 +140,7 @@ def test_repo_discovery_rejects_raw_query_flag(monkeypatch, capsys) -> None:
 
 
 def test_repo_discovery_rejects_path_flags(monkeypatch, capsys) -> None:
-    _set_cli_args(monkeypatch, {"path": "billing", "limit": 5})
+    _set_cli_args(monkeypatch, {"path": "billing"})
 
     with pytest.raises(SystemExit):
         asyncio.run(repo_discovery.main())

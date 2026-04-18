@@ -66,9 +66,7 @@ def test_repo_discovery_renderer_strips_github_domain_for_repos_and_prefix() -> 
             success=True,
             exit_code=0,
             result_json={
-                "term": "pantry",
                 "repo_prefix": "github.com/acme/pantry",
-                "search_query": "pantry",
                 "repositories": ["github.com/acme/pantry_pal_api", "github.com/acme/pantry_pal_ui"],
                 "candidates": [],
                 "total_hits": 2,
